@@ -116,9 +116,9 @@ export class Slack {
     });
   }
 
-  startTyping(channel: string) {
+  startTyping(channel: string, threadTs?: string) {
     const send = () => {
-      if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ id: ++this.outgoingId, type: "typing", channel }));
+      if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ id: ++this.outgoingId, type: "typing", channel, thread_ts: threadTs }));
     };
     send();
     const timer = setInterval(send, 3_000);
