@@ -1,5 +1,6 @@
 import { WebClient } from "@slack/web-api";
 import WebSocket from "ws";
+import { isIgnoredMessage } from "./message-rules.js";
 
 export type SlackMessage = {
   channel: string;
@@ -63,13 +64,46 @@ export class Slack {
 
   async search(query: string, count = 20) {
     const result = await this.web.search.messages({ query, count: Math.min(count, 100), sort: "timestamp", sort_dir: "desc" });
-    const matches = result.messages?.matches ?? [];
+    const matches = (result.messages?.matches ?? []).filter((message) => !isIgnoredMessage(message.text));
     return Promise.all(matches.map(async (message) => ({
       channel: message.channel?.id ?? message.channel?.name,
       ts: message.ts,
       user: message.user ? await this.name(message.user) : message.username,
       text: message.text,
     })));
+  }
+
+  async channelInfo(channel: string) {
+    const { channel: info } = await this.web.conversations.info({ channel });
+    return {
+      id: info?.id,
+      name: info?.name,
+      topic: info?.topic?.value,
+      purpose: info?.purpose?.value,
+      private: info?.is_private,
+      directMessage: info?.is_im,
+      groupMessage: info?.is_mpim,
+      members: info?.num_members,
+    };
+  }
+
+  async userInfo(user: string) {
+    const { user: info } = await this.web.users.info({ user });
+    return {
+      id: info?.id,
+      username: info?.name,
+      realName: info?.real_name,
+      displayName: info?.profile?.display_name,
+      title: info?.profile?.title,
+      bot: info?.is_bot,
+      deleted: info?.deleted,
+      timezone: info?.tz,
+    };
+  }
+
+  async members(channel: string, limit = 50) {
+    const result = await this.web.conversations.members({ channel, limit: Math.min(limit, 100) });
+    return Promise.all((result.members ?? []).map(async (id) => ({ id, name: await this.name(id) })));
   }
 
   async post(channel: string, text: string, threadTs?: string) {
@@ -104,8 +138,9 @@ export class Slack {
   }
 
   private async format(messages: SlackMessage[]) {
-    return Promise.all(messages.map(async ({ ts, user, bot_id, text, thread_ts }) => ({
+    return Promise.all(messages.filter(({ text }) => !isIgnoredMessage(text)).map(async ({ ts, user, bot_id, text, thread_ts }) => ({
       ts,
+      authorId: user ?? bot_id,
       author: await this.name(user ?? bot_id),
       text: text ?? "",
       thread_ts,
