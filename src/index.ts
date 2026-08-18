@@ -47,7 +47,7 @@ slack.onMessage(async (message) => {
   const relevant = !pinged && (auto || subscribed) ? await kevin.relevant(message) : false;
   if (!pinged && !relevant) return;
 
-  const stopTyping = slack.startTyping(message.channel);
+  const stopTyping = slack.startTyping(message.channel, message.thread_ts);
   const typingStarted = Date.now();
   try {
     const reply = await kevin.respond(message);
