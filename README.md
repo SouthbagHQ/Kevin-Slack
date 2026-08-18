@@ -6,6 +6,7 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Ping mode replies to an `@Kevin` mention in any conversation visible to the signed-in user.
 - Replies use `google/gemini-3.5-flash`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
 - Messages beginning with `##` are ignored. A ping subscribes Kevin to that thread for relevant replies; `@Kevin !stop` silences it until the next ping.
+- A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
 
 ## Run
 

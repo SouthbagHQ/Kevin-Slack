@@ -12,6 +12,7 @@ export const config = {
   slackCookie: required("SLACK_XOXD"),
   slackCookieS: process.env.SLACK_XOXD_S,
   autoChannel: process.env.AUTO_CHANNEL ?? "C0BQG11SC8P",
+  channelModesFile: process.env.CHANNEL_MODES_FILE ?? "./data/channel-modes.json",
   memoryFile: process.env.MEMORY_FILE ?? "./data/memory.json",
   threadMutesFile: process.env.THREAD_MUTES_FILE ?? "./data/thread-mutes.json",
   logLevel: process.env.LOG_LEVEL ?? "info",

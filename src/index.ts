@@ -1,4 +1,5 @@
 import { KevinAgent } from "./agent.js";
+import { ChannelModes } from "./channel-modes.js";
 import { config } from "./config.js";
 import { MemoryStore } from "./memory.js";
 import { isIgnoredMessage, isMentioned, isStopCommand } from "./message-rules.js";
@@ -6,7 +7,8 @@ import { Slack } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
 
 const slack = new Slack(config.slackToken, config.slackCookie, config.slackCookieS);
-const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile));
+const channelModes = await new ChannelModes(config.channelModesFile, [config.autoChannel]).load();
+const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes);
 const threadMutes = await new ThreadMutes(config.threadMutesFile).load();
 const seen = new Set<string>();
 
@@ -16,7 +18,7 @@ const remember = (key: string) => {
 };
 
 const { userId, team } = await slack.identity();
-console.log(`Kevin connected to ${team ?? "Slack"} as ${userId}; auto mode: ${config.autoChannel}`);
+console.log(`Kevin connected to ${team ?? "Slack"} as ${userId}; auto mode: ${channelModes.list().join(", ") || "off"}`);
 
 slack.onMessage(async (message) => {
   if (!message.channel || !message.ts || !message.text || message.hidden || message.user === userId || isIgnoredMessage(message.text)) return;
@@ -40,12 +42,13 @@ slack.onMessage(async (message) => {
   if (pinged) await threadMutes.subscribe(threadKey);
   if (threadMutes.has(threadKey)) return;
 
-  const auto = message.channel === config.autoChannel;
+  const auto = channelModes.isEnabled(message.channel);
+  const dm = message.channel.startsWith("D");
   const subscribed = threadMutes.isSubscribed(threadKey);
-  if (!pinged && !auto && !subscribed) return;
+  if (!pinged && !dm && !auto && !subscribed) return;
 
-  const relevant = !pinged && (auto || subscribed) ? await kevin.relevant(message) : false;
-  if (!pinged && !relevant) return;
+  const relevant = !pinged && !dm && (auto || subscribed) ? await kevin.relevant(message) : false;
+  if (!pinged && !dm && !relevant) return;
 
   const stopTyping = slack.startTyping(message.channel, message.thread_ts);
   const typingStarted = Date.now();

@@ -87,6 +87,13 @@ export class Slack {
     };
   }
 
+  async channelManagers(channel: string) {
+    const result = await this.web.apiCall("admin.roles.entity.listAssignments", { entity_id: channel }) as unknown as {
+      role_assignments?: { users?: string[] }[];
+    };
+    return [...new Set((result.role_assignments ?? []).flatMap(({ users }) => users ?? []))];
+  }
+
   async userInfo(user: string) {
     const { user: info } = await this.web.users.info({ user });
     return {
