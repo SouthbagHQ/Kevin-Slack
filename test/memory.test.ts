@@ -13,4 +13,15 @@ describe("MemoryStore", () => {
     expect(await store.list()).toMatchObject([{ content: "The Briefcase is occupied." }]);
     expect(JSON.parse(await readFile(file, "utf8"))).toHaveLength(1);
   });
+
+  it("edits a memory by ID without creating a duplicate", async () => {
+    const file = join(await mkdtemp(join(tmpdir(), "kevin-")), "memory.json");
+    const store = new MemoryStore(file);
+    const original = await store.save("Kevin owns one chair.");
+    const edited = await store.edit(original.id, "Kevin owns two chairs.");
+
+    expect(edited).toMatchObject({ id: original.id, content: "Kevin owns two chairs." });
+    expect(await store.list()).toMatchObject([{ id: original.id, content: "Kevin owns two chairs." }]);
+    await expect(store.edit("missing", "No.")).rejects.toThrow("Memory missing not found");
+  });
 });
