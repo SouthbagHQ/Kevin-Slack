@@ -13,11 +13,30 @@ export type SlackMessage = {
   thread_ts?: string;
   hidden?: boolean;
   huddle?: boolean;
+  files?: SlackImage[];
+  attachments?: { image_url?: string; thumb_url?: string; title?: string }[];
+  blocks?: unknown[];
 };
+
+type SlackImage = {
+  id?: string;
+  name?: string;
+  title?: string;
+  mimetype?: string;
+  url_private?: string;
+  thumb_480?: string;
+  thumb_720?: string;
+  thumb_800?: string;
+  thumb_1024?: string;
+};
+
+export type ViewedImage = { id: string; name?: string; url: string };
+type ImageSource = { id: string; name?: string; url?: string; fileId?: string };
 
 export class Slack {
   readonly web: WebClient;
   private names = new Map<string, Promise<string>>();
+  private images = new Map<string, ImageSource>();
   private socket?: WebSocket;
   private ping?: NodeJS.Timeout;
   private reconnect?: NodeJS.Timeout;
@@ -62,23 +81,62 @@ export class Slack {
 
   async history(channel: string, limit = 20) {
     const result = await this.web.conversations.history({ channel, limit: Math.min(limit, 100) });
-    return this.format((result.messages ?? []) as SlackMessage[]);
+    return this.format((result.messages ?? []) as SlackMessage[], channel);
   }
 
   async replies(channel: string, ts: string, limit = 30) {
     const result = await this.web.conversations.replies({ channel, ts, limit: Math.min(limit, 100) });
-    return this.format((result.messages ?? []) as SlackMessage[]);
+    return this.format((result.messages ?? []) as SlackMessage[], channel);
   }
 
   async search(query: string, count = 20) {
     const result = await this.web.search.messages({ query, count: Math.min(count, 100), sort: "timestamp", sort_dir: "desc" });
     const matches = (result.messages?.matches ?? []).filter((message) => !isIgnoredMessage(message.text));
-    return Promise.all(matches.map(async (message) => ({
-      channel: message.channel?.id ?? message.channel?.name,
-      ts: message.ts,
-      user: message.user ? await this.name(message.user) : message.username,
-      text: message.text,
-    })));
+    return Promise.all(matches.map(async (message) => {
+      const channel = message.channel?.id ?? message.channel?.name ?? "unknown";
+      const images = this.imageReferences(message as SlackMessage, channel);
+      return {
+        channel,
+        ts: message.ts,
+        user: message.user ? await this.name(message.user) : message.username,
+        text: message.text,
+        ...(images.length ? { images } : {}),
+      };
+    }));
+  }
+
+  modelMessage(message: SlackMessage) {
+    const { files: _files, attachments: _attachments, blocks: _blocks, ...plain } = message;
+    const images = this.imageReferences(message, message.channel);
+    return { ...plain, ...(images.length ? { images } : {}) };
+  }
+
+  hasImages(message: SlackMessage) {
+    return this.imageReferences(message, message.channel).length > 0;
+  }
+
+  async viewImage(id: string): Promise<ViewedImage> {
+    const source = this.images.get(id);
+    if (!source) throw new Error(`Unknown or expired image ID: ${id}`);
+    let url = source.url;
+    if (!url && source.fileId) {
+      const result = await this.web.files.info({ file: source.fileId });
+      const file = result.file as SlackImage | undefined;
+      url = file && this.imageUrl(file);
+    }
+    if (!url) throw new Error(`Image ${id} has no readable URL`);
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") throw new Error(`Image ${id} does not use HTTPS`);
+    if (parsed.hostname !== "slack.com" && !parsed.hostname.endsWith(".slack.com")) return { id, name: source.name, url };
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${this.token}`, Cookie: this.cookieHeader() } });
+    if (!response.ok) throw new Error(`Slack image download failed: ${response.status}`);
+    const size = Number(response.headers.get("content-length") ?? 0);
+    if (size > 10_000_000) throw new Error(`Image ${id} exceeds 10 MB`);
+    const mime = response.headers.get("content-type")?.split(";", 1)[0] ?? "";
+    if (!new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]).has(mime)) throw new Error(`Unsupported image type: ${mime || "unknown"}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > 10_000_000) throw new Error(`Image ${id} exceeds 10 MB`);
+    return { id, name: source.name, url: `data:${mime};base64,${bytes.toString("base64")}` };
   }
 
   async channelInfo(channel: string) {
@@ -190,14 +248,51 @@ export class Slack {
     return resolving;
   }
 
-  private async format(messages: SlackMessage[]) {
-    return Promise.all(messages.filter(({ text }) => !isIgnoredMessage(text)).map(async ({ ts, user, bot_id, text, thread_ts }) => ({
-      ts,
-      authorId: user ?? bot_id,
-      author: await this.name(user ?? bot_id),
-      text: text ?? "",
-      thread_ts,
-    })));
+  private async format(messages: SlackMessage[], channel: string) {
+    return Promise.all(messages.filter(({ text }) => !isIgnoredMessage(text)).map(async (message) => {
+      const images = this.imageReferences(message, channel);
+      return {
+        ts: message.ts,
+        authorId: message.user ?? message.bot_id,
+        author: await this.name(message.user ?? message.bot_id),
+        text: message.text ?? "",
+        thread_ts: message.thread_ts,
+        ...(images.length ? { images } : {}),
+      };
+    }));
+  }
+
+  private imageReferences(message: SlackMessage, channel: string) {
+    const sources: ImageSource[] = [];
+    for (const file of message.files ?? []) {
+      if (!file.mimetype?.startsWith("image/") || !file.id) continue;
+      sources.push({ id: `image_${file.id}`, fileId: file.id, name: file.name ?? file.title, url: this.imageUrl(file) });
+    }
+    for (const [index, attachment] of (message.attachments ?? []).entries()) {
+      const url = attachment.image_url ?? attachment.thumb_url;
+      if (url) sources.push({ id: this.attachmentImageId(channel, message.ts, index), name: attachment.title, url });
+    }
+    for (const [index, block] of (message.blocks ?? []).entries()) {
+      if (!block || typeof block !== "object" || (block as { type?: string }).type !== "image") continue;
+      const image = block as { image_url?: string; alt_text?: string; slack_file?: { id?: string } };
+      const fileId = image.slack_file?.id;
+      if (image.image_url || fileId) sources.push({ id: fileId ? `image_${fileId}` : this.attachmentImageId(channel, message.ts, index + (message.attachments?.length ?? 0)), name: image.alt_text, url: image.image_url, fileId });
+    }
+    const unique = [...new Map(sources.map((source) => [source.id, source])).values()];
+    for (const source of unique) {
+      this.images.delete(source.id);
+      this.images.set(source.id, source);
+    }
+    while (this.images.size > 500) this.images.delete(this.images.keys().next().value!);
+    return unique.map(({ id, name }) => ({ id, name }));
+  }
+
+  private imageUrl(file: SlackImage) {
+    return file.thumb_1024 ?? file.thumb_800 ?? file.thumb_720 ?? file.thumb_480 ?? file.url_private;
+  }
+
+  private attachmentImageId(channel: string, ts: string, index: number) {
+    return `image_${channel}_${ts.replace(/\W/g, "_")}_${index}`;
   }
 
   private cookieHeader() {

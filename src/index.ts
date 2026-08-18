@@ -90,18 +90,19 @@ const conversationKey = (message: SlackMessage) => message.thread_ts
   : `${message.channel}:${message.channel.startsWith("D") ? "dm" : `channel:${message.user ?? "unknown"}`}`;
 
 slack.onMessage(async (message) => {
-  if (!message.channel || !message.ts || !message.text || message.hidden || message.user === userId || isIgnoredMessage(message.text)) return;
-  if (message.subtype && message.subtype !== "bot_message") return;
+  const text = message.text ?? "";
+  if (!message.channel || !message.ts || (!text && !slack.hasImages(message)) || message.hidden || message.user === userId || isIgnoredMessage(text)) return;
+  if (message.subtype && message.subtype !== "bot_message" && message.subtype !== "file_share") return;
 
   const key = `${message.channel}:${message.ts}`;
   if (seen.has(key)) return;
   remember(key);
 
-  const pinged = isMentioned(message.text, userId);
+  const pinged = isMentioned(text, userId);
   const threadTs = message.thread_ts ?? message.ts;
   const threadKey = `${message.channel}:${threadTs}`;
 
-  if (isStopCommand(message.text, userId)) {
+  if (isStopCommand(text, userId)) {
     queue.cancel(conversationKey(message));
     await threadMutes.mute(threadKey);
     const sent = await slack.post(message.channel, "Kevin has left this thread.", threadTs);
