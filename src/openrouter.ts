@@ -10,41 +10,52 @@ export type Message =
   | { role: "tool"; content: string; tool_call_id: string };
 
 export class OpenRouter {
-  constructor(private key: string) {}
+  constructor(private key: string, private timeoutMs = 45_000) {}
 
   private headers() {
     return { Authorization: `Bearer ${this.key}`, "Content-Type": "application/json", "X-OpenRouter-Title": "Kevin Slack" };
   }
 
+  private async request(path: string, body: Record<string, unknown>, label = "OpenRouter") {
+    let failure: Error | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch(`https://openrouter.ai/api/v1/${path}`, {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch (error) {
+        failure = error instanceof Error ? error : new Error(String(error));
+        if (attempt === 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** attempt + Math.random() * 200));
+        continue;
+      }
+      if (response.ok) return response;
+      failure = new Error(`${label} ${response.status}: ${await response.text()}`);
+      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** attempt + Math.random() * 200));
+    }
+    throw failure ?? new Error(`${label} request failed`);
+  }
+
   async chat(body: Record<string, unknown>) {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error(`OpenRouter ${response.status}: ${await response.text()}`);
+    const response = await this.request("chat/completions", body);
     return (await response.json()) as {
       choices: { finish_reason: string | null; message: { role: "assistant"; content: string | null; tool_calls?: ToolCall[] } }[];
     };
   }
 
   async transcribe(audio: Buffer, model: string, format = "webm") {
-    const response = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ model, input_audio: { data: audio.toString("base64"), format }, language: "en", temperature: 0 }),
-    });
-    if (!response.ok) throw new Error(`OpenRouter STT ${response.status}: ${await response.text()}`);
+    const response = await this.request("audio/transcriptions", { model, input_audio: { data: audio.toString("base64"), format }, language: "en", temperature: 0 }, "OpenRouter STT");
     return (await response.json() as { text?: string }).text?.trim() ?? "";
   }
 
   async speech(input: string, model: string, voice: string) {
-    const response = await fetch("https://openrouter.ai/api/v1/audio/speech", {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ model, input, voice, response_format: "mp3" }),
-    });
-    if (!response.ok) throw new Error(`OpenRouter TTS ${response.status}: ${await response.text()}`);
+    const response = await this.request("audio/speech", { model, input, voice, response_format: "mp3" }, "OpenRouter TTS");
     return Buffer.from(await response.arrayBuffer());
   }
 }

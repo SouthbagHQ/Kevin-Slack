@@ -9,6 +9,7 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
 - Kevin automatically accepts Huddle invitations while free, can join an active Huddle when asked, and exposes a leave tool while inside one. Competing invitations are declined.
 - Huddle audio is transcribed with `qwen/qwen3-asr-0.6b`; replies are spoken with `hexgrad/kokoro-82m`. The Chromium session sends and receives audio only—no camera or video feed.
+- Slack work is queued per thread, DM, or top-level sender. Up to four conversations run concurrently, and consecutive messages from one user are combined after a short debounce instead of producing one reply each.
 
 ## Run
 

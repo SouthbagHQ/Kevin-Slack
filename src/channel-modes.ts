@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 
 export class ChannelModes {
   private enabled: Set<string>;
+  private writes = Promise.resolve();
 
   constructor(private file: string, defaults: string[] = []) {
     this.enabled = new Set(defaults);
@@ -27,9 +28,13 @@ export class ChannelModes {
 
   async set(channel: string, enabled: boolean) {
     enabled ? this.enabled.add(channel) : this.enabled.delete(channel);
-    await mkdir(dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    await writeFile(temp, JSON.stringify(this.list(), null, 2), { mode: 0o600 });
-    await rename(temp, this.file);
+    const write = this.writes.then(async () => {
+      await mkdir(dirname(this.file), { recursive: true });
+      const temp = `${this.file}.${process.pid}.tmp`;
+      await writeFile(temp, JSON.stringify(this.list(), null, 2), { mode: 0o600 });
+      await rename(temp, this.file);
+    });
+    this.writes = write.then(() => undefined, () => undefined);
+    await write;
   }
 }

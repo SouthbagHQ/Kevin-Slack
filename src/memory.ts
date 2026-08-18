@@ -5,6 +5,8 @@ import { dirname } from "node:path";
 export type Memory = { id: string; content: string; createdAt: string };
 
 export class MemoryStore {
+  private writes = Promise.resolve();
+
   constructor(private file: string) {}
 
   async list() {
@@ -17,13 +19,17 @@ export class MemoryStore {
   }
 
   async save(content: string) {
-    const memories = await this.list();
-    const memory = { id: randomUUID(), content: content.trim(), createdAt: new Date().toISOString() };
-    memories.push(memory);
-    await mkdir(dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    await writeFile(temp, JSON.stringify(memories, null, 2), { mode: 0o600 });
-    await rename(temp, this.file);
-    return memory;
+    const write = this.writes.then(async () => {
+      const memories = await this.list();
+      const memory = { id: randomUUID(), content: content.trim(), createdAt: new Date().toISOString() };
+      memories.push(memory);
+      await mkdir(dirname(this.file), { recursive: true });
+      const temp = `${this.file}.${process.pid}.tmp`;
+      await writeFile(temp, JSON.stringify(memories, null, 2), { mode: 0o600 });
+      await rename(temp, this.file);
+      return memory;
+    });
+    this.writes = write.then(() => undefined, () => undefined);
+    return write;
   }
 }

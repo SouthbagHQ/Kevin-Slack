@@ -27,7 +27,6 @@ export class Slack {
   private stopped = false;
   private handler?: (message: SlackMessage) => Promise<void>;
   private huddleHandler?: (event: HuddleEvent) => Promise<void>;
-  private queue = Promise.resolve();
 
   constructor(private token: string, private cookie: string, private cookieS?: string) {
     this.web = new WebClient(token, { headers: { Cookie: this.cookieHeader() } });
@@ -254,7 +253,7 @@ export class Slack {
             return;
           }
           if (event.type !== "message" || !this.handler) return;
-          this.queue = this.queue.then(() => this.handler!(event)).catch((error) => console.error("Message failed", error));
+          void this.handler(event).catch((error) => console.error("Message failed", error));
         } catch (error) {
           console.error("Invalid Slack gateway event", error);
         }

@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 export class ThreadMutes {
   private muted = new Set<string>();
   private subscribed = new Set<string>();
+  private writes = Promise.resolve();
 
   constructor(private file: string) {}
 
@@ -40,9 +41,13 @@ export class ThreadMutes {
   }
 
   private async save() {
-    await mkdir(dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    await writeFile(temp, JSON.stringify({ muted: [...this.muted], subscribed: [...this.subscribed] }, null, 2), { mode: 0o600 });
-    await rename(temp, this.file);
+    const write = this.writes.then(async () => {
+      await mkdir(dirname(this.file), { recursive: true });
+      const temp = `${this.file}.${process.pid}.tmp`;
+      await writeFile(temp, JSON.stringify({ muted: [...this.muted], subscribed: [...this.subscribed] }, null, 2), { mode: 0o600 });
+      await rename(temp, this.file);
+    });
+    this.writes = write.then(() => undefined, () => undefined);
+    await write;
   }
 }
