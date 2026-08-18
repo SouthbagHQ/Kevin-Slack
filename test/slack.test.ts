@@ -11,6 +11,6 @@ describe("Slack", () => {
     const stop = slack.startTyping("C123", "123.456");
     stop();
 
-    expect(JSON.parse(send.mock.calls[0]![0]!)).toMatchObject({ type: "typing", channel: "C123", thread_ts: "123.456" });
+    expect(JSON.parse(send.mock.calls[0]![0]!)).toEqual({ id: 1, type: "user_typing", channel: "C123", thread_ts: "123.456" });
   });
 });
