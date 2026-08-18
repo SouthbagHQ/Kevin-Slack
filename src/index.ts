@@ -1,14 +1,16 @@
 import { KevinAgent } from "./agent.js";
 import { ChannelModes } from "./channel-modes.js";
 import { config } from "./config.js";
+import { HuddleBrowser } from "./huddle-browser.js";
+import { HuddleManager } from "./huddles.js";
 import { MemoryStore } from "./memory.js";
 import { isIgnoredMessage, isMentioned, isStopCommand } from "./message-rules.js";
+import { OpenRouter } from "./openrouter.js";
 import { Slack } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
 
 const slack = new Slack(config.slackToken, config.slackCookie, config.slackCookieS);
 const channelModes = await new ChannelModes(config.channelModesFile, [config.autoChannel]).load();
-const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes);
 const threadMutes = await new ThreadMutes(config.threadMutesFile).load();
 const seen = new Set<string>();
 
@@ -18,7 +20,30 @@ const remember = (key: string) => {
 };
 
 const { userId, team } = await slack.identity();
+const huddles = new HuddleManager(
+  slack,
+  new OpenRouter(config.openRouterKey),
+  new HuddleBrowser(config.chromePath, config.huddleSilenceMs),
+  userId,
+  { mediaRegion: config.chimeMediaRegion, sttModel: config.sttModel, ttsModel: config.ttsModel, ttsVoice: config.ttsVoice },
+);
+const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, huddles);
 console.log(`Kevin connected to ${team ?? "Slack"} as ${userId}; auto mode: ${channelModes.list().join(", ") || "off"}`);
+
+slack.onHuddleEvent((event) => huddles.handleEvent(event));
+huddles.onTranscript(async ({ text, speakerId, channelId, threadTs }) => {
+  const message = {
+    channel: channelId,
+    thread_ts: threadTs,
+    ts: `${Date.now() / 1_000}`,
+    user: speakerId,
+    text: `[Spoken in the current Huddle] ${text}`,
+    huddle: true,
+  };
+  if (!/\bkevin\b/i.test(text) && !(await kevin.relevant(message))) return;
+  const reply = await kevin.respond(message);
+  if (reply) await huddles.speak(reply);
+});
 
 slack.onMessage(async (message) => {
   if (!message.channel || !message.ts || !message.text || message.hidden || message.user === userId || isIgnoredMessage(message.text)) return;
@@ -67,6 +92,7 @@ slack.onMessage(async (message) => {
 });
 
 const shutdown = async () => {
+  await huddles.stop();
   await slack.stop();
   process.exit(0);
 };

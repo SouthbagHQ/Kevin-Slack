@@ -7,10 +7,12 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Replies use `google/gemini-3.5-flash`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
 - Messages beginning with `##` are ignored. A ping subscribes Kevin to that thread for relevant replies; `@Kevin !stop` silences it until the next ping.
 - A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
+- Kevin automatically accepts Huddle invitations while free, can join an active Huddle when asked, and exposes a leave tool while inside one. Competing invitations are declined.
+- Huddle audio is transcribed with `qwen/qwen3-asr-0.6b`; replies are spoken with `hexgrad/kokoro-82m`. The Chromium session sends and receives audio only—no camera or video feed.
 
 ## Run
 
-Requires Node.js 20+.
+Requires Node.js 20+, Bun, and Chromium.
 
 ```sh
 cp .env.example .env
