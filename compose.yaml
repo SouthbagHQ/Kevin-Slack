@@ -1,0 +1,10 @@
+services:
+  kevin:
+    image: ghcr.io/southbaghq/kevin-slack:latest
+    container_name: kevin-slack
+    restart: unless-stopped
+    pull_policy: always
+    env_file: .env
+    shm_size: 256mb
+    volumes:
+      - ./data:/app/data
