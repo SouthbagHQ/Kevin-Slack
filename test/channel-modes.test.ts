@@ -7,9 +7,8 @@ import { ChannelModes } from "../src/channel-modes.js";
 describe("ChannelModes", () => {
   it("persists enabled channels", async () => {
     const file = join(await mkdtemp(join(tmpdir(), "kevin-")), "channel-modes.json");
-    const modes = await new ChannelModes(file, ["C1"]).load();
-    expect(modes.isEnabled("C1")).toBe(true);
-    await modes.set("C1", false);
+    const modes = await new ChannelModes(file).load();
+    expect(modes.list()).toEqual([]);
     await modes.set("C2", true);
     const reloaded = await new ChannelModes(file).load();
     expect(reloaded.isEnabled("C1")).toBe(false);

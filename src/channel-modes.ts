@@ -2,12 +2,10 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export class ChannelModes {
-  private enabled: Set<string>;
+  private enabled = new Set<string>();
   private writes = Promise.resolve();
 
-  constructor(private file: string, defaults: string[] = []) {
-    this.enabled = new Set(defaults);
-  }
+  constructor(private file: string) {}
 
   async load() {
     try {

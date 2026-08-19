@@ -9,7 +9,7 @@ import { Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
 
 const slack = new Slack(config.slackToken, config.slackCookie, config.slackCookieS);
-const channelModes = await new ChannelModes(config.channelModesFile, [config.autoChannel]).load();
+const channelModes = await new ChannelModes(config.channelModesFile).load();
 const threadMutes = await new ThreadMutes(config.threadMutesFile).load();
 const seen = new Set<string>();
 
