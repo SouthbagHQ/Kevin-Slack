@@ -40,13 +40,9 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   if (!pinged && !dm && !relevant) return;
 
   const stopTyping = slack.startTyping(message.channel, message.thread_ts);
-  const typingStarted = Date.now();
   try {
     const reply = await kevin.respond(message);
     if (!reply || threadMutes.has(threadKey)) return;
-    const humanTypingTime = Math.min(4_500, 500 + reply.length * 12 + Math.random() * 700);
-    const remaining = humanTypingTime - (Date.now() - typingStarted);
-    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
     if (threadMutes.has(threadKey)) return;
     const sent = await slack.post(message.channel, reply, message.thread_ts);
     if (sent.ts) remember(`${message.channel}:${sent.ts}`);
