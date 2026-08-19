@@ -3,7 +3,7 @@ import { ChannelModes } from "./channel-modes.js";
 import { config } from "./config.js";
 import { ConversationQueue } from "./conversation-queue.js";
 import { MemoryStore } from "./memory.js";
-import { isIgnoredMessage, isMentioned, isStopCommand } from "./message-rules.js";
+import { isBotMessage, isIgnoredMessage, isMentioned, isStopCommand } from "./message-rules.js";
 import { OpenRouter } from "./openrouter.js";
 import { Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
@@ -67,8 +67,8 @@ const conversationKey = (message: SlackMessage) => message.thread_ts
 
 slack.onMessage(async (message) => {
   const text = message.text ?? "";
-  if (!message.channel || !message.ts || (!text && !slack.hasImages(message)) || message.hidden || message.user === userId || isIgnoredMessage(text)) return;
-  if (message.subtype && message.subtype !== "bot_message" && message.subtype !== "file_share") return;
+  if (!message.channel || !message.ts || (!text && !slack.hasImages(message)) || message.hidden || message.user === userId || isBotMessage(message) || isIgnoredMessage(text)) return;
+  if (message.subtype && message.subtype !== "file_share") return;
 
   const key = `${message.channel}:${message.ts}`;
   if (seen.has(key)) return;
