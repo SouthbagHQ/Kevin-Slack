@@ -22,6 +22,18 @@ npm install
 npm start
 ```
 
+## Docker
+
+The image runs as a non-root user and stores channel modes, memory, and thread state in `/app/data`.
+
+```sh
+docker build -t kevin-slack .
+docker run -d --name kevin-slack --restart unless-stopped --shm-size=256m \
+  --env-file .env -v "$(pwd)/data:/app/data" kevin-slack
+```
+
+Pushes to `master`, the weekly schedule, and manual workflow runs publish `ghcr.io/southbaghq/kevin-slack:latest` plus a commit-SHA tag.
+
 Set `OPENROUTER_KEY`, `SLACK_XOXC`, and `SLACK_XOXD` in `.env`. The Slack values are full `xoxc-…` and `xoxd-…` values; do not add `d=` around the cookie.
 
 To import credentials from an `agent-browser state save` file without printing them:

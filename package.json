@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && npm run build:huddle",
     "build:huddle": "bun build src/huddle-page.ts --target=browser --format=esm --define global=globalThis --outfile=dist/huddle-page.js --minify",
     "predev": "npm run build:huddle",
     "prestart": "npm run build:huddle",
