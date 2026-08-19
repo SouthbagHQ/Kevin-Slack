@@ -3,10 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run build:huddle",
-    "build:huddle": "bun build src/huddle-page.ts --target=browser --format=esm --define global=globalThis --outfile=dist/huddle-page.js --minify",
-    "predev": "npm run build:huddle",
-    "prestart": "npm run build:huddle",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsx watch src/index.ts",
     "import-slack-state": "node scripts/import-slack-state.mjs",
     "start": "tsx src/index.ts",
@@ -15,9 +12,7 @@
   },
   "dependencies": {
     "@slack/web-api": "^7.0.0",
-    "amazon-chime-sdk-js": "^3.31.0",
     "dotenv": "^17.0.0",
-    "playwright-core": "^1.55.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
