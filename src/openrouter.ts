@@ -49,14 +49,4 @@ export class OpenRouter {
       choices: { finish_reason: string | null; message: { role: "assistant"; content: string | null; tool_calls?: ToolCall[] } }[];
     };
   }
-
-  async transcribe(audio: Buffer, model: string, format = "webm") {
-    const response = await this.request("audio/transcriptions", { model, input_audio: { data: audio.toString("base64"), format }, language: "en", temperature: 0 }, "OpenRouter STT");
-    return (await response.json() as { text?: string }).text?.trim() ?? "";
-  }
-
-  async speech(input: string, model: string, voice: string) {
-    const response = await this.request("audio/speech", { model, input, voice, response_format: "mp3" }, "OpenRouter TTS");
-    return Buffer.from(await response.arrayBuffer());
-  }
 }

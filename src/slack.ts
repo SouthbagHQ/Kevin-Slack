@@ -1,6 +1,5 @@
 import { WebClient } from "@slack/web-api";
 import WebSocket from "ws";
-import { activeHuddleFromMessages, normalizeHuddleEvent, normalizeJoinResponse, type HuddleEvent } from "./huddle-types.js";
 import { isIgnoredMessage } from "./message-rules.js";
 
 export type SlackMessage = {
@@ -12,7 +11,6 @@ export type SlackMessage = {
   subtype?: string;
   thread_ts?: string;
   hidden?: boolean;
-  huddle?: boolean;
   files?: SlackImage[];
   attachments?: { image_url?: string; thumb_url?: string; title?: string }[];
   blocks?: unknown[];
@@ -42,10 +40,8 @@ export class Slack {
   private reconnect?: NodeJS.Timeout;
   private outgoingId = 0;
   private gateway?: string;
-  private workspaceUrl?: string;
   private stopped = false;
   private handler?: (message: SlackMessage) => Promise<void>;
-  private huddleHandler?: (event: HuddleEvent) => Promise<void>;
 
   constructor(private token: string, private cookie: string, private cookieS?: string) {
     this.web = new WebClient(token, { headers: { Cookie: this.cookieHeader() } });
@@ -54,16 +50,11 @@ export class Slack {
   async identity() {
     const result = await this.web.auth.test();
     if (!result.user_id) throw new Error("Slack auth.test returned no user_id");
-    if (result.url) this.workspaceUrl = result.url;
     return { userId: result.user_id, team: result.team };
   }
 
   onMessage(handler: (message: SlackMessage) => Promise<void>) {
     this.handler = handler;
-  }
-
-  onHuddleEvent(handler: (event: HuddleEvent) => Promise<void>) {
-    this.huddleHandler = handler;
   }
 
   async start() {
@@ -179,42 +170,12 @@ export class Slack {
     return Promise.all((result.members ?? []).map(async (id) => ({ id, name: await this.name(id) })));
   }
 
-  async activeHuddle(channel: string, threadTs?: string) {
-    const result = threadTs
-      ? await this.web.conversations.replies({ channel, ts: threadTs, limit: 1, inclusive: true })
-      : await this.web.conversations.history({ channel, limit: 100 });
-    return activeHuddleFromMessages(result.messages, channel, threadTs);
-  }
-
   async ensureChannelAccess(channel: string) {
     const { channel: info } = await this.web.conversations.info({ channel });
     if (info?.is_member) return true;
     if (!info || info.is_private) return false;
     await this.web.conversations.join({ channel });
     return true;
-  }
-
-  async joinHuddle(channel: string, mediaRegion: string) {
-    const form = new FormData();
-    form.set("channel_id", channel);
-    form.set("regions", mediaRegion);
-    form.set("token", this.token);
-    form.set("multidevice", "true");
-    const response = await fetch(new URL("/api/rooms.join", await this.workspace()), { method: "POST", headers: { Cookie: this.cookieHeader() }, body: form });
-    if (!response.ok) throw new Error(`rooms.join HTTP ${response.status}`);
-    return normalizeJoinResponse(await response.json());
-  }
-
-  async declineHuddle(channel: string, callId: string) {
-    const form = new FormData();
-    form.set("token", this.token);
-    form.set("response", "decline");
-    form.set("channel_id", channel);
-    form.set("room_id", callId);
-    form.set("_x_reason", "respond-to-huddle-invite");
-    const response = await fetch(new URL("/api/rooms.inviteResponse", await this.workspace()), { method: "POST", headers: { Cookie: this.cookieHeader() }, body: form });
-    const result = await response.json() as { ok?: boolean; error?: string };
-    if (!response.ok || !result.ok) throw new Error(`rooms.inviteResponse failed: ${result.error ?? response.status}`);
   }
 
   async post(channel: string, text: string, threadTs?: string) {
@@ -299,13 +260,6 @@ export class Slack {
     return `d=${this.cookie}${this.cookieS ? `; d-s=${this.cookieS}` : ""}`;
   }
 
-  private async workspace() {
-    if (this.workspaceUrl) return this.workspaceUrl;
-    const auth = await this.web.auth.test();
-    if (!auth.url) throw new Error("Slack auth.test returned no workspace URL");
-    return this.workspaceUrl = auth.url;
-  }
-
   private async gatewayUrl() {
     const auth = await this.web.auth.test();
     if (!auth.url) throw new Error("Slack auth.test returned no workspace URL");
@@ -342,11 +296,6 @@ export class Slack {
       socket.on("message", (data) => {
         try {
           const event = JSON.parse(data.toString()) as SlackMessage & { type?: string };
-          const huddleEvent = normalizeHuddleEvent(event);
-          if (huddleEvent && this.huddleHandler) {
-            void this.huddleHandler(huddleEvent).catch((error) => console.error("Huddle event failed", error));
-            return;
-          }
           if (event.type !== "message" || !this.handler) return;
           void this.handler(event).catch((error) => console.error("Message failed", error));
         } catch (error) {
