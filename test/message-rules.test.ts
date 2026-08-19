@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isIgnoredMessage, isMentioned, isStopCommand } from "../src/message-rules.js";
+import { isBotMessage, isIgnoredMessage, isMentioned, isStopCommand } from "../src/message-rules.js";
 
 describe("message rules", () => {
   it("ignores messages beginning with ##", () => {
@@ -13,5 +13,11 @@ describe("message rules", () => {
     expect(isStopCommand("<@U123>!stop", "U123")).toBe(true);
     expect(isStopCommand("<@U123> !stop", "U123")).toBe(true);
     expect(isStopCommand("<@U123> hello", "U123")).toBe(false);
+  });
+
+  it("recognizes bot messages", () => {
+    expect(isBotMessage({ bot_id: "B123" })).toBe(true);
+    expect(isBotMessage({ subtype: "bot_message" })).toBe(true);
+    expect(isBotMessage({})).toBe(false);
   });
 });
