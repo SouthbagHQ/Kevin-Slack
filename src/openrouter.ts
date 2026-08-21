@@ -44,7 +44,7 @@ export class OpenRouter {
   }
 
   async chat(body: Record<string, unknown>) {
-    const response = await this.request("chat/completions", body);
+    const response = await this.request("chat/completions", { ...body, provider: { data_collection: "deny" } });
     return (await response.json()) as {
       choices: { finish_reason: string | null; message: { role: "assistant"; content: string | null; tool_calls?: ToolCall[] } }[];
     };
