@@ -19,6 +19,6 @@ export const config = {
   maxBatchMessages: Number(process.env.MAX_BATCH_MESSAGES ?? 20),
   maxPendingBatches: Number(process.env.MAX_PENDING_BATCHES ?? 50),
   logLevel: process.env.LOG_LEVEL ?? "info",
-  replyModel: "google/gemini-3.5-flash-lite",
+  replyModel: "google/gemini-3.7-flash",
   classifierModel: "google/gemini-3.5-flash-lite",
 };
