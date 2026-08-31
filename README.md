@@ -5,7 +5,7 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Auto mode classifies messages in channels enabled at runtime through Kevin with `google/gemini-3.5-flash-lite` and replies only when relevant.
 - Ping mode replies to an `@Kevin` mention in any conversation visible to the signed-in user.
 - Replies use `google/gemini-3.5-flash-lite`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
-- Messages beginning with `##` are ignored. A ping subscribes Kevin to that thread for relevant replies; `@Kevin !stop` silences it until the next ping.
+- Messages beginning with `##` are ignored. `@Kevin !stop` silences a thread until the next ping. Without auto/relevance mode, Kevin replies only to pings and DMs; a subscribed thread does not get auto replies.
 - A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
 - Slack work is queued per thread, DM, or top-level sender. Up to four conversations run concurrently, and consecutive messages from one user are combined after a short debounce instead of producing one reply each.
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.

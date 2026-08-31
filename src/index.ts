@@ -3,7 +3,7 @@ import { ChannelModes } from "./channel-modes.js";
 import { config } from "./config.js";
 import { ConversationQueue } from "./conversation-queue.js";
 import { MemoryStore } from "./memory.js";
-import { isBotMessage, isIgnoredMessage, isMentioned, isStopCommand } from "./message-rules.js";
+import { isBotMessage, isIgnoredMessage, isMentioned, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
 import { OpenRouter } from "./openrouter.js";
 import { Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
@@ -22,7 +22,7 @@ const { userId, team } = await slack.identity();
 const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes);
 console.log(`Kevin connected to ${team ?? "Slack"} as ${userId}; auto mode: ${channelModes.list().join(", ") || "off"}`);
 
-type Incoming = { message: SlackMessage; pinged: boolean; dm: boolean; subscribed: boolean };
+type Incoming = { message: SlackMessage; pinged: boolean; dm: boolean };
 
 const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   const latest = values.at(-1)!;
@@ -32,11 +32,12 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   };
   const pinged = values.some((item) => item.pinged);
   const dm = values.some((item) => item.dm);
-  const subscribed = values.some((item) => item.subscribed);
   const threadKey = `${message.channel}:${message.thread_ts ?? message.ts}`;
   if (threadMutes.has(threadKey)) return;
 
-  const relevant = !pinged && !dm && (channelModes.isEnabled(message.channel) || subscribed) ? await kevin.relevant(message) : false;
+  const relevant = shouldClassifyRelevance({ pinged, dm, autoMode: channelModes.isEnabled(message.channel) })
+    ? await kevin.relevant(message)
+    : false;
   if (!pinged && !dm && !relevant) return;
 
   const stopTyping = slack.startTyping(message.channel, message.thread_ts);
@@ -88,12 +89,12 @@ slack.onMessage(async (message) => {
   const auto = channelModes.isEnabled(message.channel);
   const dm = message.channel.startsWith("D");
   const subscribed = threadMutes.isSubscribed(threadKey);
-  if (!pinged && !dm && !auto && !subscribed) return;
+  if (!shouldConsiderMessage({ pinged, dm, autoMode: auto })) return;
   const accepted = queue.enqueue({
     key: conversationKey(message),
     sender: message.user ?? message.bot_id ?? "unknown",
     priority: pinged || dm ? 2 : subscribed ? 1 : 0,
-    value: { message, pinged, dm, subscribed },
+    value: { message, pinged, dm },
   });
   if (!accepted && (pinged || dm)) await slack.post(message.channel, "Kevin is occupied. Your queue-capacity fee has been charged.", message.thread_ts);
 });
