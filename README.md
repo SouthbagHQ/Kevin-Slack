@@ -6,6 +6,7 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Ping mode replies to an `@Kevin` mention in any conversation visible to the signed-in user.
 - Replies use `google/gemini-3.5-flash-lite`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
 - Messages beginning with `##` are ignored. `@Kevin !stop` silences a thread until the next ping. Without auto/relevance mode, Kevin replies only to pings and DMs; a subscribed thread does not get auto replies. Channel topic, description, and name changes are treated as message events (still gated by ping/DM/auto relevance).
+- Current messages and channel/thread history include a `messageType` object (`kind`, `visibility`, `fromBot`, `inThread`). Ephemeral notices delivered to Kevin are admitted and labeled `visibility: "ephemeral"` so He knows they are private to Him.
 - A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
 - Kevin can remove a user from a channel, or change that channel's topic or description, when He is one of that channel's managers; Slack's channel-manager assignment for Kevin is authoritative.
 - Reply and relevance context include the current channel's name, topic, and description.

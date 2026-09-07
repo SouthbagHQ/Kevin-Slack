@@ -1,6 +1,6 @@
 import { WebClient } from "@slack/web-api";
 import WebSocket from "ws";
-import { isIgnoredMessage } from "./message-rules.js";
+import { describeMessageType, isIgnoredMessage } from "./message-rules.js";
 
 export type SlackMessage = {
   channel: string;
@@ -11,6 +11,7 @@ export type SlackMessage = {
   subtype?: string;
   thread_ts?: string;
   hidden?: boolean;
+  is_ephemeral?: boolean;
   files?: SlackImage[];
   attachments?: { image_url?: string; thumb_url?: string; title?: string }[];
   blocks?: unknown[];
@@ -91,15 +92,20 @@ export class Slack {
         ts: message.ts,
         user: message.user ? await this.name(message.user) : message.username,
         text: message.text,
+        messageType: describeMessageType(message as SlackMessage),
         ...(images.length ? { images } : {}),
       };
     }));
   }
 
   modelMessage(message: SlackMessage) {
-    const { files: _files, attachments: _attachments, blocks: _blocks, ...plain } = message;
+    const { files: _files, attachments: _attachments, blocks: _blocks, hidden: _hidden, is_ephemeral: _ephemeral, ...plain } = message;
     const images = this.imageReferences(message, message.channel);
-    return { ...plain, ...(images.length ? { images } : {}) };
+    return {
+      ...plain,
+      messageType: describeMessageType(message),
+      ...(images.length ? { images } : {}),
+    };
   }
 
   hasImages(message: SlackMessage) {
@@ -231,6 +237,7 @@ export class Slack {
         author: await this.name(message.user ?? message.bot_id),
         text: message.text ?? "",
         thread_ts: message.thread_ts,
+        messageType: describeMessageType(message),
         ...(images.length ? { images } : {}),
       };
     }));

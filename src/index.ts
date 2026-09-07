@@ -4,7 +4,7 @@ import { ChannelModes } from "./channel-modes.js";
 import { config } from "./config.js";
 import { ConversationQueue } from "./conversation-queue.js";
 import { MemoryStore } from "./memory.js";
-import { isBotMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
+import { isBotMessage, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
 import { Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
 
@@ -72,7 +72,8 @@ const conversationKey = (message: SlackMessage) => message.thread_ts
 
 slack.onMessage(async (message) => {
   const text = message.text ?? "";
-  if (!message.channel || !message.ts || (!text && !slack.hasImages(message)) || message.hidden || message.user === userId || isIgnoredMessage(text) || !isRespondableMessage(message)) return;
+  // Hidden system events (edits/deletes) are dropped; ephemeral notices for Kevin are allowed through.
+  if (!message.channel || !message.ts || (!text && !slack.hasImages(message)) || (message.hidden && !isEphemeralMessage(message)) || message.user === userId || isIgnoredMessage(text) || !isRespondableMessage(message)) return;
 
   const key = `${message.channel}:${message.ts}`;
   if (seen.has(key)) return;
