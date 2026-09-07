@@ -18,6 +18,7 @@ export const config = {
   messageDebounceMs: Number(process.env.MESSAGE_DEBOUNCE_MS ?? 900),
   maxBatchMessages: Number(process.env.MAX_BATCH_MESSAGES ?? 20),
   maxPendingBatches: Number(process.env.MAX_PENDING_BATCHES ?? 50),
+  maxBotExchanges: Number(process.env.MAX_BOT_EXCHANGES ?? 10),
   logLevel: process.env.LOG_LEVEL ?? "info",
   replyModel: "google/gemini-3.7-flash",
   classifierModel: "google/gemini-3.5-flash-lite",

@@ -10,6 +10,7 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Kevin can remove a user from a channel, or change that channel's topic or description, when He is one of that channel's managers; Slack's channel-manager assignment for Kevin is authoritative.
 - Reply and relevance context include the current channel's name, topic, and description.
 - Slack work is queued per thread, DM, or top-level sender. Up to four conversations run concurrently, and consecutive messages from one user are combined after a short debounce instead of producing one reply each.
+- Kevin may reply to other bots. After ten consecutive Kevin↔bot replies in a thread, DM, or channel with no human message in between, He stops until a human speaks again (override with `MAX_BOT_EXCHANGES`).
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
 
 ## Run

@@ -3,6 +3,7 @@ const mention = (userId: string) => `<@${userId}(?:\\|[^>]+)?>`;
 /** Slack message subtypes Kevin may treat as conversational events (beyond plain messages). */
 const RESPONDABLE_SUBTYPES = new Set([
   "file_share",
+  "bot_message",
   "channel_topic",
   "channel_purpose",
   "channel_name",
