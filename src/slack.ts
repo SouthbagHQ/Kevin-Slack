@@ -136,6 +136,7 @@ export class Slack {
       id: info?.id,
       name: info?.name,
       topic: info?.topic?.value,
+      description: info?.purpose?.value,
       purpose: info?.purpose?.value,
       private: info?.is_private,
       directMessage: info?.is_im,
@@ -168,6 +169,18 @@ export class Slack {
   async members(channel: string, limit = 50) {
     const result = await this.web.conversations.members({ channel, limit: Math.min(limit, 100) });
     return Promise.all((result.members ?? []).map(async (id) => ({ id, name: await this.name(id) })));
+  }
+
+  async kick(channel: string, user: string) {
+    await this.web.conversations.kick({ channel, user });
+  }
+
+  async setTopic(channel: string, topic: string) {
+    await this.web.conversations.setTopic({ channel, topic });
+  }
+
+  async setDescription(channel: string, description: string) {
+    await this.web.conversations.setPurpose({ channel, purpose: description });
   }
 
   async ensureChannelAccess(channel: string) {

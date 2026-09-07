@@ -7,6 +7,8 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Replies use `google/gemini-3.5-flash-lite`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
 - Messages beginning with `##` are ignored. `@Kevin !stop` silences a thread until the next ping. Without auto/relevance mode, Kevin replies only to pings and DMs; a subscribed thread does not get auto replies.
 - A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
+- Kevin can remove a user from a channel, or change that channel's topic or description, when He is one of that channel's managers; Slack's channel-manager assignment for Kevin is authoritative.
+- Reply and relevance context include the current channel's name, topic, and description.
 - Slack work is queued per thread, DM, or top-level sender. Up to four conversations run concurrently, and consecutive messages from one user are combined after a short debounce instead of producing one reply each.
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
 
