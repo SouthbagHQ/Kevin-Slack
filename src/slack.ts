@@ -170,6 +170,10 @@ export class Slack {
     return Promise.all((result.members ?? []).map(async (id) => ({ id, name: await this.name(id) })));
   }
 
+  async kick(channel: string, user: string) {
+    await this.web.conversations.kick({ channel, user });
+  }
+
   async ensureChannelAccess(channel: string) {
     const { channel: info } = await this.web.conversations.info({ channel });
     if (info?.is_member) return true;
