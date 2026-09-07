@@ -1,16 +1,17 @@
 import { KevinAgent } from "./agent.js";
+import { BotExchanges, botExchangeKey } from "./bot-exchanges.js";
 import { ChannelModes } from "./channel-modes.js";
 import { config } from "./config.js";
 import { ConversationQueue } from "./conversation-queue.js";
 import { MemoryStore } from "./memory.js";
 import { isBotMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
-import { OpenRouter } from "./openrouter.js";
 import { Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
 
 const slack = new Slack(config.slackToken, config.slackCookie, config.slackCookieS);
 const channelModes = await new ChannelModes(config.channelModesFile).load();
 const threadMutes = await new ThreadMutes(config.threadMutesFile).load();
+const botExchanges = new BotExchanges(config.maxBotExchanges);
 const seen = new Set<string>();
 
 const remember = (key: string) => {
@@ -32,8 +33,14 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   };
   const pinged = values.some((item) => item.pinged);
   const dm = values.some((item) => item.dm);
+  const fromBot = values.some((item) => isBotMessage(item.message));
+  const exchangeKey = botExchangeKey(message);
   const threadKey = `${message.channel}:${message.thread_ts ?? message.ts}`;
   if (threadMutes.has(threadKey)) return;
+  if (fromBot && botExchanges.atLimit(exchangeKey)) {
+    console.log(`Skipping bot loop in ${exchangeKey} after ${botExchanges.max} exchanges`);
+    return;
+  }
 
   const relevant = shouldClassifyRelevance({ pinged, dm, autoMode: channelModes.isEnabled(message.channel) })
     ? await kevin.relevant(message)
@@ -47,7 +54,8 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
     if (threadMutes.has(threadKey)) return;
     const sent = await slack.post(message.channel, reply, message.thread_ts);
     if (sent.ts) remember(`${message.channel}:${sent.ts}`);
-    console.log(`Replied in ${message.channel} to ${message.ts} (${pinged ? "ping" : dm ? "dm" : "auto"}; ${values.length + omitted} message${values.length + omitted === 1 ? "" : "s"})`);
+    if (fromBot) botExchanges.noteBotReply(exchangeKey);
+    console.log(`Replied in ${message.channel} to ${message.ts} (${pinged ? "ping" : dm ? "dm" : "auto"}; ${values.length + omitted} message${values.length + omitted === 1 ? "" : "s"}${fromBot ? `; bot exchange ${botExchanges.count(exchangeKey)}/${botExchanges.max}` : ""})`);
   } finally {
     stopTyping();
   }
@@ -60,15 +68,25 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
 
 const conversationKey = (message: SlackMessage) => message.thread_ts
   ? `${message.channel}:thread:${message.thread_ts}`
-  : `${message.channel}:${message.channel.startsWith("D") ? "dm" : `channel:${message.user ?? "unknown"}`}`;
+  : `${message.channel}:${message.channel.startsWith("D") ? "dm" : `channel:${message.user ?? message.bot_id ?? "unknown"}`}`;
 
 slack.onMessage(async (message) => {
   const text = message.text ?? "";
-  if (!message.channel || !message.ts || (!text && !slack.hasImages(message)) || message.hidden || message.user === userId || isBotMessage(message) || isIgnoredMessage(text) || !isRespondableMessage(message)) return;
+  if (!message.channel || !message.ts || (!text && !slack.hasImages(message)) || message.hidden || message.user === userId || isIgnoredMessage(text) || !isRespondableMessage(message)) return;
 
   const key = `${message.channel}:${message.ts}`;
   if (seen.has(key)) return;
   remember(key);
+
+  const exchangeKey = botExchangeKey(message);
+  if (isBotMessage(message)) {
+    if (botExchanges.atLimit(exchangeKey)) {
+      console.log(`Ignoring bot message in ${exchangeKey}; exchange cap ${botExchanges.max} reached`);
+      return;
+    }
+  } else {
+    botExchanges.noteHuman(exchangeKey);
+  }
 
   const pinged = isMentioned(text, userId);
   const threadTs = message.thread_ts ?? message.ts;

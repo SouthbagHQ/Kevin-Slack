@@ -21,13 +21,13 @@ describe("message rules", () => {
     expect(isBotMessage({})).toBe(false);
   });
 
-  it("allows plain messages, file shares, and channel metadata changes", () => {
+  it("allows plain messages, file shares, bot messages, and channel metadata changes", () => {
     expect(isRespondableMessage({})).toBe(true);
     expect(isRespondableMessage({ subtype: "file_share" })).toBe(true);
+    expect(isRespondableMessage({ subtype: "bot_message" })).toBe(true);
     expect(isRespondableMessage({ subtype: "channel_topic" })).toBe(true);
     expect(isRespondableMessage({ subtype: "channel_purpose" })).toBe(true);
     expect(isRespondableMessage({ subtype: "channel_name" })).toBe(true);
-    expect(isRespondableMessage({ subtype: "bot_message" })).toBe(false);
     expect(isRespondableMessage({ subtype: "message_changed" })).toBe(false);
     expect(isRespondableMessage({ subtype: "channel_join" })).toBe(false);
   });
