@@ -136,6 +136,7 @@ export class Slack {
       id: info?.id,
       name: info?.name,
       topic: info?.topic?.value,
+      description: info?.purpose?.value,
       purpose: info?.purpose?.value,
       private: info?.is_private,
       directMessage: info?.is_im,
@@ -172,6 +173,14 @@ export class Slack {
 
   async kick(channel: string, user: string) {
     await this.web.conversations.kick({ channel, user });
+  }
+
+  async setTopic(channel: string, topic: string) {
+    await this.web.conversations.setTopic({ channel, topic });
+  }
+
+  async setDescription(channel: string, description: string) {
+    await this.web.conversations.setPurpose({ channel, purpose: description });
   }
 
   async ensureChannelAccess(channel: string) {

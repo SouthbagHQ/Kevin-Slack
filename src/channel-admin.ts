@@ -2,6 +2,21 @@ import { ChannelModes } from "./channel-modes.js";
 
 const channelId = (value: unknown): value is string => typeof value === "string" && /^[CG][A-Z0-9]+$/.test(value);
 const userId = (value: unknown): value is string => typeof value === "string" && /^U[A-Z0-9]+$/.test(value);
+const channelText = (value: unknown): value is string => typeof value === "string" && value.length <= 250;
+
+const requireKevinManager = async (
+  managersFor: (channel: string) => Promise<string[]>,
+  kevinId: string | undefined,
+  channel: unknown,
+  failure: string,
+) => {
+  if (!kevinId) return { ok: false as const, error: `Kevin could not be identified. ${failure}` };
+  if (!channelId(channel)) return { ok: false as const, error: `A valid Slack channel ID is required. ${failure}` };
+  if (!(await managersFor(channel)).includes(kevinId)) {
+    return { ok: false as const, error: `Kevin is not a manager of that channel. ${failure}` };
+  }
+  return { ok: true as const, channel };
+};
 
 export const setChannelAutoMode = async (
   managersFor: (channel: string) => Promise<string[]>,
@@ -28,14 +43,42 @@ export const removeChannelMember = async (
   channel: unknown,
   user: unknown,
 ) => {
-  if (!kevinId) return { ok: false, error: "Kevin could not be identified. The user was not removed." };
-  if (!channelId(channel) || !userId(user)) {
-    return { ok: false, error: "A valid Slack channel ID and user ID are required. The user was not removed." };
-  }
+  const allowed = await requireKevinManager(managersFor, kevinId, channel, "The user was not removed.");
+  if (!allowed.ok) return allowed;
+  if (!userId(user)) return { ok: false, error: "A valid Slack user ID is required. The user was not removed." };
   if (user === kevinId) return { ok: false, error: "Kevin cannot remove Himself from a channel." };
-  if (!(await managersFor(channel)).includes(kevinId)) {
-    return { ok: false, error: "Kevin is not a manager of that channel. The user was not removed." };
+  await kick(allowed.channel, user);
+  return { ok: true, channel: allowed.channel, user };
+};
+
+export const setChannelTopic = async (
+  managersFor: (channel: string) => Promise<string[]>,
+  setTopic: (channel: string, topic: string) => Promise<void>,
+  kevinId: string | undefined,
+  channel: unknown,
+  topic: unknown,
+) => {
+  const allowed = await requireKevinManager(managersFor, kevinId, channel, "The topic was not changed.");
+  if (!allowed.ok) return allowed;
+  if (!channelText(topic)) {
+    return { ok: false, error: "A topic of at most 250 characters is required. The topic was not changed." };
   }
-  await kick(channel, user);
-  return { ok: true, channel, user };
+  await setTopic(allowed.channel, topic);
+  return { ok: true, channel: allowed.channel, topic };
+};
+
+export const setChannelDescription = async (
+  managersFor: (channel: string) => Promise<string[]>,
+  setDescription: (channel: string, description: string) => Promise<void>,
+  kevinId: string | undefined,
+  channel: unknown,
+  description: unknown,
+) => {
+  const allowed = await requireKevinManager(managersFor, kevinId, channel, "The description was not changed.");
+  if (!allowed.ok) return allowed;
+  if (!channelText(description)) {
+    return { ok: false, error: "A description of at most 250 characters is required. The description was not changed." };
+  }
+  await setDescription(allowed.channel, description);
+  return { ok: true, channel: allowed.channel, description };
 };
