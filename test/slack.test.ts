@@ -27,6 +27,12 @@ describe("Slack", () => {
       channel: "C123",
       ts: "123.456",
       text: "look",
+      messageType: {
+        kind: "message",
+        visibility: "channel",
+        fromBot: false,
+        inThread: false,
+      },
       images: [{ id: "image_F123", name: "receipt.png" }],
     });
 
@@ -38,5 +44,29 @@ describe("Slack", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("labels ephemeral messages in model context", () => {
+    const slack = new Slack("token", "cookie");
+    expect(slack.modelMessage({
+      channel: "C123",
+      ts: "123.456",
+      text: "only you",
+      bot_id: "B1",
+      is_ephemeral: true,
+      hidden: true,
+    })).toEqual({
+      channel: "C123",
+      ts: "123.456",
+      text: "only you",
+      bot_id: "B1",
+      messageType: {
+        kind: "ephemeral",
+        visibility: "ephemeral",
+        fromBot: true,
+        inThread: false,
+        note: "Only visible to Kevin in this channel; not stored in channel history for others",
+      },
+    });
   });
 });

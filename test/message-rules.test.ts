@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isBotMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "../src/message-rules.js";
+import { describeMessageType, isBotMessage, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "../src/message-rules.js";
 
 describe("message rules", () => {
   it("ignores messages beginning with ##", () => {
@@ -21,6 +21,11 @@ describe("message rules", () => {
     expect(isBotMessage({})).toBe(false);
   });
 
+  it("recognizes ephemeral messages", () => {
+    expect(isEphemeralMessage({ is_ephemeral: true })).toBe(true);
+    expect(isEphemeralMessage({})).toBe(false);
+  });
+
   it("allows plain messages, file shares, bot messages, and channel metadata changes", () => {
     expect(isRespondableMessage({})).toBe(true);
     expect(isRespondableMessage({ subtype: "file_share" })).toBe(true);
@@ -30,6 +35,29 @@ describe("message rules", () => {
     expect(isRespondableMessage({ subtype: "channel_name" })).toBe(true);
     expect(isRespondableMessage({ subtype: "message_changed" })).toBe(false);
     expect(isRespondableMessage({ subtype: "channel_join" })).toBe(false);
+  });
+
+  it("describes message types including ephemeral visibility", () => {
+    expect(describeMessageType({})).toEqual({
+      kind: "message",
+      visibility: "channel",
+      fromBot: false,
+      inThread: false,
+    });
+    expect(describeMessageType({ is_ephemeral: true, bot_id: "B1", thread_ts: "1.2" })).toEqual({
+      kind: "ephemeral",
+      visibility: "ephemeral",
+      fromBot: true,
+      inThread: true,
+      note: "Only visible to Kevin in this channel; not stored in channel history for others",
+    });
+    expect(describeMessageType({ subtype: "channel_topic" })).toMatchObject({
+      kind: "channel_topic",
+      visibility: "channel",
+      subtype: "channel_topic",
+    });
+    expect(describeMessageType({ subtype: "file_share" }).kind).toBe("file_share");
+    expect(describeMessageType({ bot_id: "B9" }).kind).toBe("bot_message");
   });
 
   it("never auto-responds from a subscribed thread unless relevance mode is on", () => {
