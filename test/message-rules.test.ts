@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isBotMessage, isIgnoredMessage, isMentioned, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "../src/message-rules.js";
+import { isBotMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "../src/message-rules.js";
 
 describe("message rules", () => {
   it("ignores messages beginning with ##", () => {
@@ -19,6 +19,17 @@ describe("message rules", () => {
     expect(isBotMessage({ bot_id: "B123" })).toBe(true);
     expect(isBotMessage({ subtype: "bot_message" })).toBe(true);
     expect(isBotMessage({})).toBe(false);
+  });
+
+  it("allows plain messages, file shares, and channel metadata changes", () => {
+    expect(isRespondableMessage({})).toBe(true);
+    expect(isRespondableMessage({ subtype: "file_share" })).toBe(true);
+    expect(isRespondableMessage({ subtype: "channel_topic" })).toBe(true);
+    expect(isRespondableMessage({ subtype: "channel_purpose" })).toBe(true);
+    expect(isRespondableMessage({ subtype: "channel_name" })).toBe(true);
+    expect(isRespondableMessage({ subtype: "bot_message" })).toBe(false);
+    expect(isRespondableMessage({ subtype: "message_changed" })).toBe(false);
+    expect(isRespondableMessage({ subtype: "channel_join" })).toBe(false);
   });
 
   it("never auto-responds from a subscribed thread unless relevance mode is on", () => {
