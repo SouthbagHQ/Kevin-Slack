@@ -10,19 +10,21 @@ export type Message =
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
   | { role: "tool"; content: string; tool_call_id: string };
 
-export class OpenRouter {
+const HACKCLUB_AI_BASE = "https://ai.hackclub.com/proxy/v1";
+
+export class HackClubAI {
   constructor(private key: string, private timeoutMs = 45_000) {}
 
   private headers() {
-    return { Authorization: `Bearer ${this.key}`, "Content-Type": "application/json", "X-OpenRouter-Title": "Kevin Slack" };
+    return { Authorization: `Bearer ${this.key}`, "Content-Type": "application/json" };
   }
 
-  private async request(path: string, body: Record<string, unknown>, label = "OpenRouter") {
+  private async request(path: string, body: Record<string, unknown>, label = "Hack Club AI") {
     let failure: Error | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
       let response: Response;
       try {
-        response = await fetch(`https://openrouter.ai/api/v1/${path}`, {
+        response = await fetch(`${HACKCLUB_AI_BASE}/${path}`, {
           method: "POST",
           headers: this.headers(),
           body: JSON.stringify(body),
@@ -44,7 +46,7 @@ export class OpenRouter {
   }
 
   async chat(body: Record<string, unknown>) {
-    const response = await this.request("chat/completions", { ...body, provider: { data_collection: "deny" } });
+    const response = await this.request("chat/completions", body);
     return (await response.json()) as {
       choices: { finish_reason: string | null; message: { role: "assistant"; content: string | null; tool_calls?: ToolCall[] } }[];
     };

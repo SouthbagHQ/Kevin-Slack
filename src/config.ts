@@ -7,7 +7,7 @@ const required = (name: string, fallback?: string) => {
 };
 
 export const config = {
-  openRouterKey: required("OPENROUTER_KEY", process.env.OPENROUTER_API_KEY),
+  hackClubAiKey: required("HACKCLUB_AI_KEY", process.env.HACK_CLUB_AI_KEY),
   slackToken: required("SLACK_XOXC"),
   slackCookie: required("SLACK_XOXD"),
   slackCookieS: process.env.SLACK_XOXD_S,
