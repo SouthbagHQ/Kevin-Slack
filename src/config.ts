@@ -13,6 +13,9 @@ export const config = {
   slackCookieS: process.env.SLACK_XOXD_S,
   channelModesFile: process.env.CHANNEL_MODES_FILE ?? "./data/channel-modes.json",
   memoryFile: process.env.MEMORY_FILE ?? "./data/memory.json",
+  memoryContextLimit: Number.isFinite(Number(process.env.MEMORY_CONTEXT_LIMIT ?? 24))
+    ? Math.min(100, Math.max(1, Number(process.env.MEMORY_CONTEXT_LIMIT ?? 24)))
+    : 24,
   threadMutesFile: process.env.THREAD_MUTES_FILE ?? "./data/thread-mutes.json",
   queueConcurrency: Number(process.env.QUEUE_CONCURRENCY ?? 4),
   messageDebounceMs: Number(process.env.MESSAGE_DEBOUNCE_MS ?? 900),

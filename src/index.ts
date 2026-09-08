@@ -20,7 +20,7 @@ const remember = (key: string) => {
 };
 
 const { userId, team } = await slack.identity();
-const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId);
+const kevin = new KevinAgent(slack, await new MemoryStore(config.memoryFile).load(), channelModes, userId);
 console.log(`Kevin connected to ${team ?? "Slack"} as ${userId}; auto mode: ${channelModes.list().join(", ") || "off"}`);
 
 type Incoming = { message: SlackMessage; pinged: boolean; dm: boolean };
