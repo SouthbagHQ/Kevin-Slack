@@ -21,6 +21,6 @@ export const config = {
   maxPendingBatches: Number(process.env.MAX_PENDING_BATCHES ?? 50),
   maxBotExchanges: Number(process.env.MAX_BOT_EXCHANGES ?? 10),
   logLevel: process.env.LOG_LEVEL ?? "info",
-  replyModel: "z-ai/glm-5.3-flash",
-  classifierModel: "z-ai/glm-5.3-flash",
+  replyModel: "google/gemini-3.8-flash",
+  classifierModel: "google/gemini-3.5-flash-lite",
 };
