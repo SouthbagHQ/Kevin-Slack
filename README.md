@@ -2,9 +2,9 @@
 
 Kevin listens through Slack's browser WebSocket gateway using a user session:
 
-- Auto mode classifies messages in channels enabled at runtime through Kevin with `z-ai/glm-5.3-flash` and replies only when relevant.
+- Auto mode classifies messages in channels enabled at runtime through Kevin with `google/gemini-3.8-flash` and replies only when relevant.
 - Ping mode replies to an `@Kevin` mention in any conversation visible to the signed-in user.
-- Replies use `z-ai/glm-5.3-flash`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
+- Replies use `google/gemini-3.8-flash`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
 - Chat completions go to Hack Club AI first and fall back to OpenRouter if HCAI fails.
 - Messages beginning with `##` are ignored. `@Kevin !stop` silences a thread until the next ping. Without auto/relevance mode, Kevin replies only to pings and DMs; a subscribed thread does not get auto replies. Channel topic, description, and name changes are treated as message events (still gated by ping/DM/auto relevance).
 - Current messages and channel/thread history include a `messageType` object (`kind`, `visibility`, `fromBot`, `inThread`). Ephemeral notices delivered to Kevin are admitted and labeled `visibility: "ephemeral"` so He knows they are private to Him.
