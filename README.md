@@ -2,7 +2,7 @@
 
 Kevin listens through Slack's browser WebSocket gateway using a user session:
 
-- Auto mode classifies messages in channels enabled at runtime through Kevin with `google/gemini-3.8-flash` and replies only when relevant.
+- Auto mode classifies messages in channels enabled at runtime through Kevin with `google/gemini-3.5-flash-lite` and replies only when relevant.
 - Ping mode replies to an `@Kevin` mention in any conversation visible to the signed-in user.
 - Replies use `google/gemini-3.8-flash`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
 - Chat completions go to Hack Club AI first and fall back to OpenRouter if HCAI fails.
