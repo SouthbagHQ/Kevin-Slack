@@ -2,7 +2,7 @@ import { config } from "./config.js";
 import { removeChannelMember, setChannelAutoMode, setChannelDescription, setChannelTopic } from "./channel-admin.js";
 import { ChannelModes } from "./channel-modes.js";
 import { MemoryStore } from "./memory.js";
-import { HackClubAI, Message } from "./hackclub-ai.js";
+import { createKevinChat, Message } from "./chat.js";
 import { CLASSIFIER_PROMPT, KEVIN_PROMPT } from "./prompts.js";
 import { Slack, SlackMessage, type ViewedImage } from "./slack.js";
 
@@ -190,7 +190,7 @@ const baseTools = [...readTools, {
 }];
 
 export class KevinAgent {
-  private hackClubAi = new HackClubAI(config.hackClubAiKey);
+  private ai = createKevinChat(config.hackClubAiKey, config.openRouterKey);
   private recentReplies: string[] = [];
 
   constructor(private slack: Slack, private memory: MemoryStore, private channelModes: ChannelModes, private kevinId: string) {}
@@ -215,7 +215,7 @@ export class KevinAgent {
     ];
     for (let round = 0; round < 4; round++) {
       if (round === 3) messages.push({ role: "system", content: "Tool lookup is complete. Decide now from the context already gathered." });
-      const result = await this.hackClubAi.chat({
+      const result = await this.ai.chat({
         model: config.classifierModel,
         temperature: 0,
         messages,
@@ -280,9 +280,9 @@ export class KevinAgent {
 
     for (let round = 0; round < 5; round++) {
       if (round === 4) messages.push({ role: "system", content: "Tool lookup is complete. Write the final Slack reply now using the context already gathered." });
-      const result = await this.hackClubAi.chat({ model: config.replyModel, messages, tools: round < 4 ? tools : undefined, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95, max_tokens: 1_024 });
+      const result = await this.ai.chat({ model: config.replyModel, messages, tools: round < 4 ? tools : undefined, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95, max_tokens: 1_024 });
       const choice = result.choices[0];
-      if (!choice) throw new Error("Hack Club AI returned no reply");
+      if (!choice) throw new Error("AI returned no reply");
       const reply = choice.message;
       messages.push(reply);
       if (!reply.tool_calls?.length) {
