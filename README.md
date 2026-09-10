@@ -2,9 +2,10 @@
 
 Kevin listens through Slack's browser WebSocket gateway using a user session:
 
-- Auto mode classifies messages in channels enabled at runtime through Kevin with `google/gemini-3.5-flash-lite` and replies only when relevant.
+- Auto mode classifies messages in channels enabled at runtime through Kevin with `z-ai/glm-5.3-flash` and replies only when relevant.
 - Ping mode replies to an `@Kevin` mention in any conversation visible to the signed-in user.
-- Replies use `google/gemini-3.5-flash-lite`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
+- Replies use `z-ai/glm-5.3-flash`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
+- Chat completions go to Hack Club AI first and fall back to OpenRouter if HCAI fails.
 - Messages beginning with `##` are ignored. `@Kevin !stop` silences a thread until the next ping. Without auto/relevance mode, Kevin replies only to pings and DMs; a subscribed thread does not get auto replies. Channel topic, description, and name changes are treated as message events (still gated by ping/DM/auto relevance).
 - Current messages and channel/thread history include a `messageType` object (`kind`, `visibility`, `fromBot`, `inThread`). Ephemeral notices delivered to Kevin are admitted and labeled `visibility: "ephemeral"` so He knows they are private to Him.
 - A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
@@ -36,7 +37,7 @@ docker run -d --name kevin-slack --restart unless-stopped --shm-size=256m \
 
 Pushes to `master`, the weekly schedule, and manual workflow runs publish `ghcr.io/southbaghq/kevin-slack:latest` plus a commit-SHA tag.
 
-Set `HACKCLUB_AI_KEY`, `SLACK_XOXC`, and `SLACK_XOXD` in `.env`. Get a Hack Club AI key from [docs.ai.hackclub.com](https://docs.ai.hackclub.com/). The Slack values are full `xoxc-…` and `xoxd-…` values; do not add `d=` around the cookie.
+Set `HACKCLUB_AI_KEY`, `OPENROUTER_KEY`, `SLACK_XOXC`, and `SLACK_XOXD` in `.env`. Get a Hack Club AI key from [docs.ai.hackclub.com](https://docs.ai.hackclub.com/). OpenRouter is used only when Hack Club AI fails. The Slack values are full `xoxc-…` and `xoxd-…` values; do not add `d=` around the cookie.
 
 To import credentials from an `agent-browser state save` file without printing them:
 

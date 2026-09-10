@@ -8,6 +8,7 @@ const required = (name: string, fallback?: string) => {
 
 export const config = {
   hackClubAiKey: required("HACKCLUB_AI_KEY", process.env.HACK_CLUB_AI_KEY),
+  openRouterKey: required("OPENROUTER_KEY", process.env.OPENROUTER_API_KEY),
   slackToken: required("SLACK_XOXC"),
   slackCookie: required("SLACK_XOXD"),
   slackCookieS: process.env.SLACK_XOXD_S,
@@ -20,6 +21,6 @@ export const config = {
   maxPendingBatches: Number(process.env.MAX_PENDING_BATCHES ?? 50),
   maxBotExchanges: Number(process.env.MAX_BOT_EXCHANGES ?? 10),
   logLevel: process.env.LOG_LEVEL ?? "info",
-  replyModel: "google/gemini-3.7-flash",
-  classifierModel: "google/gemini-3.5-flash-lite",
+  replyModel: "z-ai/glm-5.3-flash",
+  classifierModel: "z-ai/glm-5.3-flash",
 };
