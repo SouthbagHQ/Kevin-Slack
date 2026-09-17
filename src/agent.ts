@@ -344,7 +344,7 @@ export class KevinAgent {
         scope.debug("Tool budget spent; forcing the final reply", { round: round + 1 });
         messages.push({ role: "system", content: "Tool lookup is complete. Write the final Slack reply now using the context already gathered." });
       }
-      const result = await this.ai.chat({ model: config.replyModel, messages, tools: round < MAX_TOOL_ROUNDS - 1 ? tools : undefined, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95, max_tokens: 1_024 });
+      const result = await this.ai.chat({ model: config.replyModel, messages, tools: round < MAX_TOOL_ROUNDS - 1 ? tools : undefined, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95, max_tokens: 4_096 });
       const choice = result.choices[0];
       if (!choice) {
         scope.error("AI returned no reply choice", { round: round + 1, ms: elapsed() });
