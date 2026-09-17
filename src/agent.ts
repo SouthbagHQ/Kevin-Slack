@@ -6,6 +6,21 @@ import { createKevinChat, Message } from "./chat.js";
 import { CLASSIFIER_PROMPT, KEVIN_PROMPT } from "./prompts.js";
 import { Slack, SlackMessage, type ViewedImage } from "./slack.js";
 
+const MAX_TOOL_ROUNDS = 10;
+
+const toolArgs = (raw: string) => (raw.length > 200 ? `${raw.slice(0, 200)}...` : raw);
+
+const toolOutcome = (result: string | ViewedImage) => {
+  if (typeof result !== "string") return `image ${result.id}`;
+  try {
+    const parsed: unknown = JSON.parse(result);
+    if (parsed && typeof parsed === "object" && "error" in parsed) return `error: ${(parsed as { error: unknown }).error}`;
+  } catch {
+    // Non-JSON tool output; fall through to the size summary.
+  }
+  return `${result.length} chars`;
+};
+
 const readTools = [
   {
     type: "function",
@@ -241,7 +256,7 @@ export class KevinAgent {
       if (!reply) return false;
       messages.push(reply);
       if (reply.tool_calls?.length) {
-        await this.addToolResults(messages, reply.tool_calls, false);
+        await this.addToolResults(messages, reply.tool_calls, false, `classify ${message.channel} round ${round + 1}/4`);
         continue;
       }
       try {
@@ -278,9 +293,9 @@ export class KevinAgent {
       },
     ];
 
-    for (let round = 0; round < 5; round++) {
-      if (round === 4) messages.push({ role: "system", content: "Tool lookup is complete. Write the final Slack reply now using the context already gathered." });
-      const result = await this.ai.chat({ model: config.replyModel, messages, tools: round < 4 ? tools : undefined, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95, max_tokens: 1_024 });
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      if (round === MAX_TOOL_ROUNDS - 1) messages.push({ role: "system", content: "Tool lookup is complete. Write the final Slack reply now using the context already gathered." });
+      const result = await this.ai.chat({ model: config.replyModel, messages, tools: round < MAX_TOOL_ROUNDS - 1 ? tools : undefined, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95, max_tokens: 1_024 });
       const choice = result.choices[0];
       if (!choice) throw new Error("AI returned no reply");
       const reply = choice.message;
@@ -298,7 +313,7 @@ export class KevinAgent {
         }
         return content;
       }
-      await this.addToolResults(messages, reply.tool_calls, true, message);
+      await this.addToolResults(messages, reply.tool_calls, true, `reply ${message.channel} round ${round + 1}/${MAX_TOOL_ROUNDS}`, message);
     }
     throw new Error("Kevin exceeded the tool-call limit");
   }
@@ -351,10 +366,13 @@ export class KevinAgent {
     }
   }
 
-  private async addToolResults(messages: Message[], calls: { id: string; function: { name: string; arguments: string } }[], allowMemory: boolean, message?: SlackMessage) {
+  private async addToolResults(messages: Message[], calls: { id: string; function: { name: string; arguments: string } }[], allowMemory: boolean, context: string, message?: SlackMessage) {
     const images: ViewedImage[] = [];
+    console.log(`Tool round (${context}): ${calls.map((call) => call.function.name).join(", ")}`);
     for (const call of calls) {
+      const started = Date.now();
       const result = await this.runTool(call.function.name, call.function.arguments, allowMemory, message);
+      console.log(`Tool ${call.function.name} (${context}) ${toolArgs(call.function.arguments)} -> ${toolOutcome(result)} in ${Date.now() - started}ms`);
       if (typeof result === "string") messages.push({ role: "tool", tool_call_id: call.id, content: result });
       else {
         images.push(result);
