@@ -21,6 +21,24 @@ export const config = {
   maxPendingBatches: Number(process.env.MAX_PENDING_BATCHES ?? 50),
   maxBotExchanges: Number(process.env.MAX_BOT_EXCHANGES ?? 10),
   logLevel: process.env.LOG_LEVEL ?? "info",
+  logFormat: process.env.LOG_FORMAT ?? "text",
   replyModel: "google/gemini-3.8-flash",
   classifierModel: "google/gemini-3.5-flash-lite",
 };
+
+/** The runtime settings worth printing at startup; never includes credentials. */
+export const configSummary = () => ({
+  replyModel: config.replyModel,
+  classifierModel: config.classifierModel,
+  queueConcurrency: config.queueConcurrency,
+  messageDebounceMs: config.messageDebounceMs,
+  maxBatchMessages: config.maxBatchMessages,
+  maxPendingBatches: config.maxPendingBatches,
+  maxBotExchanges: config.maxBotExchanges,
+  channelModesFile: config.channelModesFile,
+  memoryFile: config.memoryFile,
+  threadMutesFile: config.threadMutesFile,
+  logLevel: config.logLevel,
+  logFormat: config.logFormat,
+  openRouterFallback: Boolean(config.openRouterKey),
+});

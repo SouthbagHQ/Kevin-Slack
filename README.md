@@ -15,6 +15,20 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Kevin may reply to other bots. After ten consecutive Kevin↔bot replies in a thread, DM, or channel with no human message in between, He stops until a human speaks again (override with `MAX_BOT_EXCHANGES`).
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
 
+## Logs
+
+Every component logs through `src/logger.ts`: one line per event with a timestamp, a level, the scope that emitted it, and `key=value` fields.
+
+```
+2026-09-17T11:31:34.087Z INFO  [reply] Replied channel=C123 ts=1758108694.001 trigger=ping replyTs=1758108701.002 chars=182 ms=4310
+2026-09-17T11:31:34.089Z WARN  [chat] Chat request rejected provider="Hack Club AI" attempt=1 status=429 retryable=true ms=812
+```
+
+- `LOG_LEVEL` selects verbosity: `error`, `warn`, `info` (default), `debug`, `trace`. `info` covers startup, accepted messages, relevance decisions, tool calls, model completions, posted replies, and every denied privileged action; `debug` adds dropped-message reasons, per-call Slack API timings, queue depth, and context sizes; `trace` adds raw gateway event and typing-indicator activity.
+- `LOG_FORMAT=json` emits one JSON object per line for log shippers; `text` (default) is the human-readable form above.
+- Slack tokens, cookies, and API keys are redacted by field name and by value shape, long values are truncated (`LOG_MAX_FIELD`, default 500 characters), and message text is logged only as a short preview. Prompts, tool payloads, and image bytes are never logged — only their size and shape.
+- Failures log the error type, code, cause, and stack.
+
 ## Run
 
 Requires Node.js 20+.

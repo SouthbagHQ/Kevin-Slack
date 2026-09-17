@@ -1,3 +1,7 @@
+import { createLogger } from "./logger.js";
+
+const log = createLogger("bot-exchanges");
+
 /** Tracks consecutive Kevin↔bot replies with no human in between, per conversation. */
 export class BotExchanges {
   private counts = new Map<string, number>();
@@ -9,15 +13,21 @@ export class BotExchanges {
   }
 
   atLimit(key: string) {
-    return this.count(key) >= this.max;
+    const limited = this.count(key) >= this.max;
+    if (limited) log.debug("Bot exchange cap reached", { conversation: key, count: this.count(key), max: this.max });
+    return limited;
   }
 
   noteHuman(key: string) {
+    const previous = this.count(key);
     this.counts.delete(key);
+    if (previous) log.debug("Bot exchange counter reset by a human message", { conversation: key, previous, max: this.max });
   }
 
   noteBotReply(key: string) {
-    this.counts.set(key, this.count(key) + 1);
+    const count = this.count(key) + 1;
+    this.counts.set(key, count);
+    log.debug("Bot exchange counted", { conversation: key, count, max: this.max, tracked: this.counts.size });
   }
 }
 
