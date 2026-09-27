@@ -1,7 +1,8 @@
-import { WebClient } from "@slack/web-api";
+import { WebClient, type ChatPostMessageArguments } from "@slack/web-api";
 import WebSocket from "ws";
 import { createLogger, preview, timer } from "./logger.js";
 import { describeMessageType, isIgnoredMessage } from "./message-rules.js";
+import { formatOutgoing } from "./outgoing.js";
 
 export type SlackMessage = {
   channel: string;
@@ -13,6 +14,7 @@ export type SlackMessage = {
   thread_ts?: string;
   hidden?: boolean;
   is_ephemeral?: boolean;
+  pinned_to?: string[];
   files?: SlackImage[];
   attachments?: { image_url?: string; thumb_url?: string; title?: string }[];
   blocks?: unknown[];
@@ -35,6 +37,7 @@ type ImageSource = { id: string; name?: string; url?: string; fileId?: string };
 
 const log = createLogger("slack");
 const gatewayLog = log.child("gateway");
+const PIN_CACHE_MS = 60_000;
 const apiLog = log.child("api");
 
 /** Identifying fields of a message, safe to log without its text. */
@@ -51,6 +54,8 @@ export class Slack {
   readonly web: WebClient;
   private names = new Map<string, Promise<string>>();
   private images = new Map<string, ImageSource>();
+  private pins = new Map<string, { at: number; timestamps: Promise<Set<string>> }>();
+  private profileLabels?: Promise<Map<string, string>>;
   private socket?: WebSocket;
   private ping?: NodeJS.Timeout;
   private reconnect?: NodeJS.Timeout;
@@ -131,17 +136,19 @@ export class Slack {
         user: message.user ? await this.name(message.user) : message.username,
         text: message.text,
         messageType: describeMessageType(message as SlackMessage),
+        ...((message as SlackMessage).pinned_to?.includes(channel) ? { pinned: true } : {}),
         ...(images.length ? { images } : {}),
       };
     }));
   }
 
   modelMessage(message: SlackMessage) {
-    const { files: _files, attachments: _attachments, blocks: _blocks, hidden: _hidden, is_ephemeral: _ephemeral, ...plain } = message;
+    const { files: _files, attachments: _attachments, blocks: _blocks, hidden: _hidden, is_ephemeral: _ephemeral, pinned_to: pinnedTo, ...plain } = message;
     const images = this.imageReferences(message, message.channel);
     return {
       ...plain,
       messageType: describeMessageType(message),
+      ...(pinnedTo?.includes(message.channel) ? { pinned: true } : {}),
       ...(images.length ? { images } : {}),
     };
   }
@@ -275,21 +282,131 @@ export class Slack {
     return true;
   }
 
-  async post(channel: string, text: string, threadTs?: string) {
+  /** Every outgoing message goes through here, so formatOutgoing is the one place output is cleaned. */
+  async post(channel: string, raw: string, threadTs?: string, broadcast = false) {
+    const text = formatOutgoing(raw);
+    if (!text) throw new Error("Message is empty after formatting; nothing was sent");
     const result = await apiLog.track(
       "chat.postMessage",
       () => this.web.chat.postMessage({
         channel,
         text,
-        thread_ts: threadTs,
+        ...(threadTs ? { thread_ts: threadTs, reply_broadcast: broadcast } : {}),
         unfurl_links: false,
         unfurl_media: false,
-      }),
-      { channel, thread: threadTs, chars: text.length },
+      } as ChatPostMessageArguments),
+      { channel, thread: threadTs, broadcast: broadcast || undefined, chars: text.length },
       (response) => ({ ts: response.ts }),
     );
     log.info("Posted a message", { channel, thread: threadTs, ts: result.ts, chars: text.length, text: preview(text, 200) });
     return result;
+  }
+
+  async react(channel: string, ts: string, name: string) {
+    await apiLog.track("reactions.add", () => this.web.reactions.add({ channel, timestamp: ts, name }), { channel, ts, emoji: name });
+  }
+
+  async openDm(user: string) {
+    const result = await apiLog.track("conversations.open", () => this.web.conversations.open({ users: user }), { user }, (response) => ({ channel: response.channel?.id }));
+    const channel = result.channel?.id;
+    if (!channel) throw new Error(`Slack did not open a DM with ${user}`);
+    return channel;
+  }
+
+  async userGroups(includeUsers = false) {
+    const result = await apiLog.track(
+      "usergroups.list",
+      () => this.web.usergroups.list({ include_users: includeUsers, include_count: true }),
+      { includeUsers },
+      (response) => ({ groups: response.usergroups?.length ?? 0 }),
+    );
+    return (result.usergroups ?? []).map((group) => ({
+      id: group.id,
+      handle: group.handle,
+      name: group.name,
+      description: group.description || undefined,
+      members: group.user_count,
+      mention: group.id ? `<!subteam^${group.id}>` : undefined,
+      ...(includeUsers ? { users: (group.users ?? []).slice(0, 100) } : {}),
+    }));
+  }
+
+  /** Profile fields worth showing the model; email and phone are deliberately left out. */
+  async userProfile(user: string) {
+    const [{ profile }, labels] = await Promise.all([
+      apiLog.track("users.profile.get", () => this.web.users.profile.get({ user }), { user }),
+      this.customFieldLabels(),
+    ]);
+    const fields = Object.entries((profile?.fields ?? {}) as Record<string, { value?: string; alt?: string }>)
+      .filter(([, field]) => field?.value)
+      .map(([id, field]) => ({ label: labels.get(id) ?? id, value: field.alt || field.value }));
+    const expiration = profile?.status_expiration;
+    return {
+      id: user,
+      displayName: profile?.display_name || undefined,
+      realName: profile?.real_name || undefined,
+      pronouns: profile?.pronouns || undefined,
+      title: profile?.title || undefined,
+      status: profile?.status_text || profile?.status_emoji ? {
+        text: profile?.status_text || undefined,
+        emoji: profile?.status_emoji || undefined,
+        ...(expiration ? { expires: new Date(expiration * 1000).toISOString() } : {}),
+      } : undefined,
+      ...(fields.length ? { customFields: fields } : {}),
+    };
+  }
+
+  private customFieldLabels() {
+    this.profileLabels ??= apiLog.track("team.profile.get", () => this.web.team.profile.get())
+      .then(({ profile }) => new Map((profile?.fields ?? []).flatMap(({ id, label }) => (id && label ? [[id, label] as const] : []))))
+      .catch((error) => {
+        log.debug("Custom profile labels unavailable; showing field IDs", { error: error instanceof Error ? error.message : String(error) });
+        this.profileLabels = undefined;
+        return new Map<string, string>();
+      });
+    return this.profileLabels;
+  }
+
+  async pin(channel: string, ts: string) {
+    await apiLog.track("pins.add", () => this.web.pins.add({ channel, timestamp: ts }), { channel, ts });
+    this.pins.delete(channel);
+  }
+
+  async unpin(channel: string, ts: string) {
+    await apiLog.track("pins.remove", () => this.web.pins.remove({ channel, timestamp: ts }), { channel, ts });
+    this.pins.delete(channel);
+  }
+
+  /** Pinned message timestamps for a channel, briefly cached; failure means "none known", never a failed reply. */
+  private pinnedTimestamps(channel: string) {
+    const cached = this.pins.get(channel);
+    if (cached && Date.now() - cached.at < PIN_CACHE_MS) return cached.timestamps;
+    const timestamps = apiLog.track("pins.list", () => this.web.pins.list({ channel }), { channel }, (response) => ({ items: response.items?.length ?? 0 }))
+      .then(({ items }) => new Set((items ?? []).flatMap((item) => {
+        const ts = (item as { message?: { ts?: string } }).message?.ts;
+        return ts ? [ts] : [];
+      })))
+      .catch((error) => {
+        log.debug("Pinned messages unavailable", { channel, error: error instanceof Error ? error.message : String(error) });
+        this.pins.delete(channel);
+        return new Set<string>();
+      });
+    this.pins.set(channel, { at: Date.now(), timestamps });
+    return timestamps;
+  }
+
+  async leave(channel: string) {
+    await apiLog.track("conversations.leave", () => this.web.conversations.leave({ channel }), { channel });
+    log.info("Left a channel", { channel });
+  }
+
+  async setStatus(text: string, emoji: string, expiration: number) {
+    await apiLog.track(
+      "users.profile.set",
+      () => this.web.users.profile.set({ profile: { status_text: text, status_emoji: emoji, status_expiration: expiration } }),
+      { chars: text.length, emoji, expiration },
+    );
+    log.info("Status changed", { text: preview(text, 100), emoji, expiration });
   }
 
   startTyping(channel: string, threadTs?: string) {
@@ -325,6 +442,7 @@ export class Slack {
   private async format(messages: SlackMessage[], channel: string) {
     const visible = messages.filter(({ text }) => !isIgnoredMessage(text));
     if (visible.length !== messages.length) log.trace("Filtered ignored messages from history", { channel, dropped: messages.length - visible.length });
+    const pinned = visible.length ? await this.pinnedTimestamps(channel) : new Set<string>();
     return Promise.all(visible.map(async (message) => {
       const images = this.imageReferences(message, channel);
       return {
@@ -334,6 +452,7 @@ export class Slack {
         text: message.text ?? "",
         thread_ts: message.thread_ts,
         messageType: describeMessageType(message),
+        ...(pinned.has(message.ts) || message.pinned_to?.includes(channel) ? { pinned: true } : {}),
         ...(images.length ? { images } : {}),
       };
     }));
