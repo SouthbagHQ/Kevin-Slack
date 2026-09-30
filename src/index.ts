@@ -3,6 +3,7 @@ import { BotExchanges, botExchangeKey } from "./bot-exchanges.js";
 import { ChannelModes } from "./channel-modes.js";
 import { config, configSummary } from "./config.js";
 import { ConversationQueue } from "./conversation-queue.js";
+import { HuddleFm, type Announcement } from "./huddlefm.js";
 import { createLogger, getLogLevel, preview, setLogFormat, setLogLevel, timer } from "./logger.js";
 import { MemoryStore } from "./memory.js";
 import { isBotMessage, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
@@ -31,8 +32,18 @@ const remember = (key: string) => {
 };
 
 const { userId, team } = await slack.identity();
-const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId);
-log.info("Kevin connected", { team: team ?? "Slack", userId, autoMode: channelModes.list(), logLevel: getLogLevel() });
+const huddleFm = config.huddleFmUserId
+  ? await new HuddleFm({
+    openDm: async (user) => {
+      const { channel } = await slack.web.conversations.open({ users: user });
+      if (!channel?.id) throw new Error("conversations.open returned no channel");
+      return channel.id;
+    },
+    post: async (channel, text) => (await slack.post(channel, text)).ts,
+  }, config.huddleFmUserId, config.huddleFmFile).load()
+  : undefined;
+const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId, huddleFm);
+log.info("Kevin connected", { team: team ?? "Slack", userId, autoMode: channelModes.list(), huddleFm: config.huddleFmUserId ?? "off", logLevel: getLogLevel() });
 
 type Incoming = { message: SlackMessage; pinged: boolean; dm: boolean };
 
@@ -103,6 +114,31 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   maxPendingBatches: config.maxPendingBatches,
 });
 
+/** Kevin writes His own word on what HuddleFM reported, where He was asked. */
+const announce = async (announcement: Announcement) => {
+  const { origin } = announcement;
+  const scope = reply.with({ channel: origin.channel, thread: origin.thread_ts, event: announcement.event, huddleChannel: announcement.huddleChannel });
+  if (origin.thread_ts && threadMutes.has(`${origin.channel}:${origin.thread_ts}`)) {
+    scope.info("HuddleFM announcement skipped; thread is muted");
+    return;
+  }
+  const elapsed = timer();
+  const stopTyping = slack.startTyping(origin.channel, origin.thread_ts);
+  try {
+    const text = await kevin.announce(announcement);
+    if (!text) {
+      scope.warn("No HuddleFM announcement produced; nothing sent", { ms: elapsed() });
+      return;
+    }
+    const sent = await slack.post(origin.channel, text, origin.thread_ts);
+    if (sent.ts) remember(`${origin.channel}:${sent.ts}`);
+    scope.info("Announced a HuddleFM event", { replyTs: sent.ts, chars: text.length, ms: elapsed() });
+  } finally {
+    stopTyping();
+  }
+};
+if (huddleFm) huddleFm.onAnnouncement = announce;
+
 const conversationKey = (message: SlackMessage) => message.thread_ts
   ? `${message.channel}:thread:${message.thread_ts}`
   : `${message.channel}:${message.channel.startsWith("D") ? "dm" : `channel:${message.user ?? message.bot_id ?? "unknown"}`}`;
@@ -120,6 +156,11 @@ const dropReason = (message: SlackMessage, text: string) => {
 };
 
 slack.onMessage(async (message) => {
+  // HuddleFM's DMs are protocol replies and events, never conversation.
+  if (huddleFm?.accepts(message)) {
+    await huddleFm.receive(message);
+    return;
+  }
   const text = message.text ?? "";
   // Hidden system events (edits/deletes) are dropped; ephemeral notices for Kevin are allowed through.
   const dropped = dropReason(message, text);
@@ -196,6 +237,7 @@ process.on("uncaughtException", (error) => log.failure("Uncaught exception", err
 
 const shutdown = async (signal: string) => {
   log.info("Shutting down", { signal });
+  huddleFm?.stop();
   try {
     await slack.stop();
   } catch (error) {
