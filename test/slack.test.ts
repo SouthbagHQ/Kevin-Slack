@@ -99,7 +99,13 @@ describe("Slack", () => {
     vi.spyOn(slack.web.conversations, "history").mockResolvedValue({ ok: true, messages: [{ ts: "1.0", user: "U1", text: "hi" }] });
     vi.spyOn(slack.web.pins, "list").mockRejectedValue(new Error("missing_scope"));
     vi.spyOn(slack.web.users, "info").mockResolvedValue({ ok: true, user: { name: "bob" } });
-    expect(await slack.history("C123")).toMatchObject([{ ts: "1.0", text: "hi" }]);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(await slack.history("C123")).toMatchObject([{ ts: "1.0", text: "hi" }]);
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("formats every outgoing message and supports thread broadcast", async () => {
@@ -121,6 +127,10 @@ describe("Slack", () => {
 
     await expect(slack.post("C123", "   ")).rejects.toThrow(/empty/);
     expect(postMessage).toHaveBeenCalledTimes(2);
+
+    const command = JSON.stringify({ v: 1, query: "__init__ **live** @here", pad: "x".repeat(3_000) });
+    await slack.postVerbatim("D1", command);
+    expect(postMessage).toHaveBeenLastCalledWith({ channel: "D1", text: command, unfurl_links: false, unfurl_media: false });
   });
 
   it("returns profiles without contact details and with labeled custom fields", async () => {
@@ -154,14 +164,14 @@ describe("Slack", () => {
     expect(JSON.stringify(profile)).not.toMatch(/example\.com|555/);
   });
 
-  it("lists user groups with their mention syntax", async () => {
+  it("lists user groups without offering a mention", async () => {
     const slack = new Slack("token", "cookie");
     const list = vi.spyOn(slack.web.usergroups, "list").mockResolvedValue({
       ok: true,
       usergroups: [{ id: "S1", handle: "finance", name: "Finance", description: "", user_count: 2, users: ["U1", "U2"] }],
     });
-    expect(await slack.userGroups(true)).toEqual([{ id: "S1", handle: "finance", name: "Finance", description: undefined, members: 2, mention: "<!subteam^S1>", users: ["U1", "U2"] }]);
+    expect(await slack.userGroups(true)).toEqual([{ id: "S1", handle: "finance", name: "Finance", description: undefined, members: 2, users: ["U1", "U2"] }]);
     expect(list).toHaveBeenCalledWith({ include_users: true, include_count: true });
-    expect(await slack.userGroups()).toEqual([{ id: "S1", handle: "finance", name: "Finance", description: undefined, members: 2, mention: "<!subteam^S1>" }]);
+    expect(await slack.userGroups()).toEqual([{ id: "S1", handle: "finance", name: "Finance", description: undefined, members: 2 }]);
   });
 });

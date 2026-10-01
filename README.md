@@ -8,16 +8,28 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Every reply turn ends with one final action: `respond` (text, reactions on the current message, or both; optionally starting a thread or broadcasting a thread reply) or `stay_silent`. Either ends the turn immediately. A model that answers in plain text instead is treated as `respond` with that text.
 - During a turn Kevin can react to any message, send messages to any conversation He belongs to, DM users, pin and unpin messages, leave channels, and set His own status. Sends are capped at three and reactions at five per turn. Leaving the current channel waits until the final action is posted.
 - Messages in context carry `pinned: true` when pinned; pinned messages are read from `pins.list` (cached for a minute per channel).
-- Every outgoing message passes through one formatter: `@channel`/`@here`/`@everyone` are defused, Markdown is rewritten as Slack mrkdwn (code untouched), a leading "Kevin:" label is dropped, and length is capped at 2,000 characters.
+- Every message Kevin writes passes through one formatter: `@channel`/`@here`/`@everyone` and user-group mentions are defused, Markdown is rewritten as Slack mrkdwn (code untouched), a leading "Kevin:" label is dropped, and length is capped at 2,000 characters. HuddleFM protocol commands bypass it so their JSON arrives intact.
 - Chat completions go to Hack Club AI first and fall back to OpenRouter if HCAI fails.
 - Messages beginning with `##` are ignored. `@Kevin !stop` silences a thread until the next ping. Without auto/relevance mode, Kevin replies only to pings and DMs; a subscribed thread does not get auto replies. Channel topic, description, and name changes are treated as message events (still gated by ping/DM/auto relevance).
 - Current messages and channel/thread history include a `messageType` object (`kind`, `visibility`, `fromBot`, `inThread`). Ephemeral notices delivered to Kevin are admitted and labeled `visibility: "ephemeral"` so He knows they are private to Him.
 - A ping or DM can ask Kevin to enable or disable auto/relevance mode for a channel; Slack must identify the requester as one of that channel's managers.
-- Kevin can remove a user from a channel, or change that channel's topic or description, when He is one of that channel's managers; Slack's channel-manager assignment for Kevin is authoritative.
+- Kevin can remove a user from a channel when He is one of that channel's managers; Slack's channel-manager assignment for Kevin is authoritative.
+- Kevin can change a channel's topic or description without being a channel manager. Slack still refuses if He is not in the channel or the workspace restricts those edits.
 - Reply and relevance context include the current channel's name, topic, and description.
 - Slack work is queued per thread, DM, or top-level sender. Up to four conversations run concurrently, and consecutive messages from one user are combined after a short debounce instead of producing one reply each.
 - Kevin may reply to other bots. After ten consecutive Kevin↔bot replies in a thread, DM, or channel with no human message in between, He stops until a human speaks again (override with `MAX_BOT_EXCHANGES`).
+- Kevin can run the music in Slack huddles through [HuddleFM](https://github.com/ingoau/huddlefm/blob/main/docs/bot-api.md). See [HuddleFM](#huddlefm).
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
+
+## HuddleFM
+
+Set `HUDDLEFM_USER_ID` to the HuddleFM Slack user's ID, and add Kevin's user ID to HuddleFM's `INTEGRATION_USER_IDS`. Without `HUDDLEFM_USER_ID`, the tools and context below are off.
+
+- Asked to play something, skip, pause, or otherwise run the music, Kevin requests control of that huddle's session. He asks for every power except ending the session unless He decides He needs it. The host approves or declines in Slack.
+- Kevin writes His own message when the host approves, declines, lets the request expire, or revokes it, and when the session ends. He writes it in the conversation where He was asked, using that channel's history and His memory. After an approval He carries out whatever He was originally asked to do.
+- While Kevin controls a session, every reply in a conversation tied to it includes the live status: what is playing, the queue, volume, and recent activity. Music talk in that channel counts as relevant in auto mode.
+- Kevin notices when a song He queued fails, or when someone else skips or removes it. He says so at most once every three minutes per huddle.
+- Commands and replies travel as JSON DMs between Kevin and the HuddleFM user. Those DMs are never treated as conversation. Kevin keeps grants in `HUDDLEFM_FILE` (default `./data/huddlefm.json`) across restarts. When HuddleFM restarts and drops them, Kevin asks again for up to ten minutes.
 
 ## Logs
 

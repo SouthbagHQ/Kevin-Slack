@@ -282,10 +282,19 @@ export class Slack {
     return true;
   }
 
-  /** Every outgoing message goes through here, so formatOutgoing is the one place output is cleaned. */
+  /** Every message Kevin writes goes through here, so formatOutgoing is the one place output is cleaned. */
   async post(channel: string, raw: string, threadTs?: string, broadcast = false) {
     const text = formatOutgoing(raw);
     if (!text) throw new Error("Message is empty after formatting; nothing was sent");
+    return this.send(channel, text, threadTs, broadcast);
+  }
+
+  /** Machine-readable protocol text (HuddleFM commands) that formatting or the length cap would corrupt. */
+  async postVerbatim(channel: string, text: string) {
+    return this.send(channel, text);
+  }
+
+  private async send(channel: string, text: string, threadTs?: string, broadcast = false) {
     const result = await apiLog.track(
       "chat.postMessage",
       () => this.web.chat.postMessage({
@@ -326,7 +335,6 @@ export class Slack {
       name: group.name,
       description: group.description || undefined,
       members: group.user_count,
-      mention: group.id ? `<!subteam^${group.id}>` : undefined,
       ...(includeUsers ? { users: (group.users ?? []).slice(0, 100) } : {}),
     }));
   }
@@ -381,13 +389,18 @@ export class Slack {
   private pinnedTimestamps(channel: string) {
     const cached = this.pins.get(channel);
     if (cached && Date.now() - cached.at < PIN_CACHE_MS) return cached.timestamps;
-    const timestamps = apiLog.track("pins.list", () => this.web.pins.list({ channel }), { channel }, (response) => ({ items: response.items?.length ?? 0 }))
-      .then(({ items }) => new Set((items ?? []).flatMap((item) => {
-        const ts = (item as { message?: { ts?: string } }).message?.ts;
-        return ts ? [ts] : [];
-      })))
+    // Not apiLog.track: a failed lookup only means pins stay unmarked, so it must not log at error level.
+    const elapsed = timer();
+    const timestamps = this.web.pins.list({ channel })
+      .then(({ items }) => {
+        apiLog.debug("pins.list", { channel, items: items?.length ?? 0, ms: elapsed() });
+        return new Set((items ?? []).flatMap((item) => {
+          const ts = (item as { message?: { ts?: string } }).message?.ts;
+          return ts ? [ts] : [];
+        }));
+      })
       .catch((error) => {
-        log.debug("Pinned messages unavailable", { channel, error: error instanceof Error ? error.message : String(error) });
+        apiLog.debug("Pinned messages unavailable; leaving pins unmarked", { channel, error: error instanceof Error ? error.message : String(error), ms: elapsed() });
         this.pins.delete(channel);
         return new Set<string>();
       });

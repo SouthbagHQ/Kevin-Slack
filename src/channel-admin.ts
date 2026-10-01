@@ -70,40 +70,27 @@ export const removeChannelMember = async (
   return { ok: true, channel: allowed.channel, user };
 };
 
-export const setChannelTopic = async (
-  managersFor: (channel: string) => Promise<string[]>,
-  setTopic: (channel: string, topic: string) => Promise<void>,
-  kevinId: string | undefined,
+/** Any channel member may change the topic or description unless the workspace restricts it; Slack enforces that, not Kevin's manager role. */
+const setChannelText = async (
+  action: string,
+  field: "topic" | "description",
+  apply: (channel: string, text: string) => Promise<void>,
   channel: unknown,
-  topic: unknown,
+  text: unknown,
 ) => {
-  const action = "set_channel_topic";
-  log.debug(`${action} requested`, { channel: preview(channel, 40), topic: preview(topic, 120) });
-  const allowed = await requireKevinManager(managersFor, kevinId, channel, "The topic was not changed.", action);
-  if (!allowed.ok) return allowed;
-  if (!channelText(topic)) {
-    return deny(action, "invalid-topic", "A topic of at most 250 characters is required. The topic was not changed.", { channel: allowed.channel, topic: preview(topic, 120) });
+  log.debug(`${action} requested`, { channel: preview(channel, 40), [field]: preview(text, 120) });
+  const failure = `The ${field} was not changed.`;
+  if (!channelId(channel)) return deny(action, "invalid-channel", `A valid Slack channel ID is required. ${failure}`, { channel: preview(channel, 40) });
+  if (!channelText(text)) {
+    return deny(action, `invalid-${field}`, `A ${field} of at most 250 characters is required. ${failure}`, { channel, [field]: preview(text, 120) });
   }
-  await setTopic(allowed.channel, topic);
-  log.info(`${action} applied`, { channel: allowed.channel, topic: preview(topic, 120) });
-  return { ok: true, channel: allowed.channel, topic };
+  await apply(channel, text);
+  log.info(`${action} applied`, { channel, [field]: preview(text, 120) });
+  return { ok: true, channel, [field]: text };
 };
 
-export const setChannelDescription = async (
-  managersFor: (channel: string) => Promise<string[]>,
-  setDescription: (channel: string, description: string) => Promise<void>,
-  kevinId: string | undefined,
-  channel: unknown,
-  description: unknown,
-) => {
-  const action = "set_channel_description";
-  log.debug(`${action} requested`, { channel: preview(channel, 40), description: preview(description, 120) });
-  const allowed = await requireKevinManager(managersFor, kevinId, channel, "The description was not changed.", action);
-  if (!allowed.ok) return allowed;
-  if (!channelText(description)) {
-    return deny(action, "invalid-description", "A description of at most 250 characters is required. The description was not changed.", { channel: allowed.channel, description: preview(description, 120) });
-  }
-  await setDescription(allowed.channel, description);
-  log.info(`${action} applied`, { channel: allowed.channel, description: preview(description, 120) });
-  return { ok: true, channel: allowed.channel, description };
-};
+export const setChannelTopic = (setTopic: (channel: string, topic: string) => Promise<void>, channel: unknown, topic: unknown) =>
+  setChannelText("set_channel_topic", "topic", setTopic, channel, topic);
+
+export const setChannelDescription = (setDescription: (channel: string, description: string) => Promise<void>, channel: unknown, description: unknown) =>
+  setChannelText("set_channel_description", "description", setDescription, channel, description);

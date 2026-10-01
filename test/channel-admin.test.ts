@@ -40,14 +40,13 @@ describe("removeChannelMember", () => {
 });
 
 describe("setChannelTopic", () => {
-  it("sets topic only when Kevin is a channel manager", async () => {
+  it("sets the topic without requiring Kevin to be a channel manager", async () => {
     const setTopic = vi.fn(async () => undefined);
-    const managers = async () => ["UKEVIN1"];
 
-    expect(await setChannelTopic(managers, setTopic, "UOTHER1", "C123", "new topic")).toMatchObject({ ok: false });
+    expect(await setChannelTopic(setTopic, "bad", "new topic")).toMatchObject({ ok: false });
+    expect(await setChannelTopic(setTopic, "C123", "x".repeat(251))).toMatchObject({ ok: false });
     expect(setTopic).not.toHaveBeenCalled();
-    expect(await setChannelTopic(managers, setTopic, "UKEVIN1", "C123", "x".repeat(251))).toMatchObject({ ok: false });
-    expect(await setChannelTopic(managers, setTopic, "UKEVIN1", "C123", "new topic")).toEqual({
+    expect(await setChannelTopic(setTopic, "C123", "new topic")).toEqual({
       ok: true,
       channel: "C123",
       topic: "new topic",
@@ -57,13 +56,12 @@ describe("setChannelTopic", () => {
 });
 
 describe("setChannelDescription", () => {
-  it("sets description only when Kevin is a channel manager", async () => {
+  it("sets the description without requiring Kevin to be a channel manager", async () => {
     const setDescription = vi.fn(async () => undefined);
-    const managers = async () => ["UKEVIN1"];
 
-    expect(await setChannelDescription(managers, setDescription, "UOTHER1", "C123", "new description")).toMatchObject({ ok: false });
+    expect(await setChannelDescription(setDescription, "C123", 42)).toMatchObject({ ok: false });
     expect(setDescription).not.toHaveBeenCalled();
-    expect(await setChannelDescription(managers, setDescription, "UKEVIN1", "C123", "new description")).toEqual({
+    expect(await setChannelDescription(setDescription, "C123", "new description")).toEqual({
       ok: true,
       channel: "C123",
       description: "new description",

@@ -9,8 +9,8 @@ describe("formatOutgoing", () => {
     expect(text).toContain("email@here.com");
   });
 
-  it("keeps user and user-group mentions", () => {
-    expect(formatOutgoing("<@U123> and <!subteam^S123>")).toBe("<@U123> and <!subteam^S123>");
+  it("defuses user-group mentions but keeps user mentions", () => {
+    expect(formatOutgoing("<@U123>, <!subteam^S123|@finance> and <!subteam^S456>")).toBe("<@U123>, @\u2060finance and @\u2060group");
   });
 
   it("rewrites Markdown as Slack mrkdwn outside code", () => {
