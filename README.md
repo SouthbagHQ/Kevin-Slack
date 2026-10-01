@@ -4,7 +4,11 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 
 - Auto mode classifies messages in channels enabled at runtime through Kevin with `google/gemini-3.5-flash-lite` and replies only when relevant.
 - Ping mode replies to an `@Kevin` mention in any conversation visible to the signed-in user.
-- Replies use `google/gemini-3.8-flash`, recent channel/thread context, read-only Slack history/search tools, and persistent local memory.
+- Replies use `google/gemini-3.8-flash`, recent channel/thread context, Slack history/search/profile/user-group lookups, and persistent local memory.
+- Every reply turn ends with one final action: `respond` (text, reactions on the current message, or both; optionally starting a thread or broadcasting a thread reply) or `stay_silent`. Either ends the turn immediately. A model that answers in plain text instead is treated as `respond` with that text.
+- During a turn Kevin can react to any message, send messages to any conversation He belongs to, DM users, pin and unpin messages, leave channels, and set His own status. Sends are capped at three and reactions at five per turn. Leaving the current channel waits until the final action is posted.
+- Messages in context carry `pinned: true` when pinned; pinned messages are read from `pins.list` (cached for a minute per channel).
+- Every message Kevin writes passes through one formatter: `@channel`/`@here`/`@everyone` and user-group mentions are defused, Markdown is rewritten as Slack mrkdwn (code untouched), a leading "Kevin:" label is dropped, and length is capped at 2,000 characters. HuddleFM protocol commands bypass it so their JSON arrives intact.
 - Chat completions go to Hack Club AI first and fall back to OpenRouter if HCAI fails.
 - Messages beginning with `##` are ignored. `@Kevin !stop` silences a thread until the next ping. Without auto/relevance mode, Kevin replies only to pings and DMs; a subscribed thread does not get auto replies. Channel topic, description, and name changes are treated as message events (still gated by ping/DM/auto relevance).
 - Current messages and channel/thread history include a `messageType` object (`kind`, `visibility`, `fromBot`, `inThread`). Ephemeral notices delivered to Kevin are admitted and labeled `visibility: "ephemeral"` so He knows they are private to Him.

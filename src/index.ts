@@ -1,4 +1,5 @@
-import { KevinAgent } from "./agent.js";
+import { replyThread } from "./actions.js";
+import { KevinAgent, type Turn } from "./agent.js";
 import { BotExchanges, botExchangeKey } from "./bot-exchanges.js";
 import { ChannelModes } from "./channel-modes.js";
 import { config, configSummary } from "./config.js";
@@ -34,18 +35,39 @@ const remember = (key: string) => {
 const { userId, team } = await slack.identity();
 const huddleFm = config.huddleFmUserId
   ? await new HuddleFm({
-    openDm: async (user) => {
-      const { channel } = await slack.web.conversations.open({ users: user });
-      if (!channel?.id) throw new Error("conversations.open returned no channel");
-      return channel.id;
-    },
-    post: async (channel, text) => (await slack.post(channel, text)).ts,
+    openDm: (user) => slack.openDm(user),
+    post: async (channel, text) => (await slack.postVerbatim(channel, text)).ts,
   }, config.huddleFmUserId, config.huddleFmFile).load()
   : undefined;
 const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId, huddleFm);
 log.info("Kevin connected", { team: team ?? "Slack", userId, autoMode: channelModes.list(), huddleFm: config.huddleFmUserId ?? "off", logLevel: getLogLevel() });
 
 type Incoming = { message: SlackMessage; pinged: boolean; dm: boolean };
+
+/** Channels Kevin chose to leave during a turn; left only after the final action so a parting reply still lands. */
+const leaveChannels = async (turn: Turn, scope: typeof reply) => {
+  for (const channel of turn.leaveAfter) {
+    try {
+      await slack.leave(channel);
+    } catch (error) {
+      scope.failure("Leaving the channel failed", error, { leave: channel });
+    }
+  }
+};
+
+/** Reactions land on the message being answered; one bad emoji does not stop the rest or the reply. */
+const addReactions = async (message: SlackMessage, reactions: string[], scope: typeof reply) => {
+  let added = 0;
+  for (const emoji of reactions) {
+    try {
+      await slack.react(message.channel, message.ts, emoji);
+      added++;
+    } catch (error) {
+      scope.warn("Reaction failed", { emoji, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return added;
+};
 
 const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   const elapsed = timer();
@@ -81,24 +103,27 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   }
 
   const stopTyping = slack.startTyping(message.channel, message.thread_ts);
+  let turn: Turn | undefined;
   try {
-    const text = await kevin.respond(message);
-    if (!text) {
-      scope.warn("No reply produced; nothing sent", { ms: elapsed() });
+    turn = await kevin.respond(message);
+    if (turn.action === "silent") {
+      scope.info("Stayed silent", { reason: preview(turn.reason, 200), ms: elapsed() });
       return;
     }
     if (threadMutes.has(threadKey)) {
       scope.info("Reply discarded; thread was muted while composing", { thread: threadKey, ms: elapsed() });
       return;
     }
-    const sent = await slack.post(message.channel, text, message.thread_ts);
-    if (sent.ts) remember(`${message.channel}:${sent.ts}`);
-    if (fromBot) botExchanges.noteBotReply(exchangeKey);
-    scope.info("Replied", {
-      replyTs: sent.ts,
+    const reactions = await addReactions(message, turn.reactions, scope);
+    const sent = turn.text ? await slack.post(message.channel, turn.text, replyThread(message, turn.inThread), turn.broadcast) : undefined;
+    if (sent?.ts) remember(`${message.channel}:${sent.ts}`);
+    if (sent && fromBot) botExchanges.noteBotReply(exchangeKey);
+    scope.info(sent ? "Replied" : "Reacted", {
+      replyTs: sent?.ts,
+      reactions,
       messages: values.length + omitted,
-      chars: text.length,
-      ...(fromBot ? { botExchange: `${botExchanges.count(exchangeKey)}/${botExchanges.max}` } : {}),
+      chars: turn.text?.length ?? 0,
+      ...(sent && fromBot ? { botExchange: `${botExchanges.count(exchangeKey)}/${botExchanges.max}` } : {}),
       ms: elapsed(),
     });
   } catch (error) {
@@ -106,6 +131,7 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
     throw error;
   } finally {
     stopTyping();
+    if (turn) await leaveChannels(turn, scope);
   }
 }, {
   concurrency: config.queueConcurrency,
@@ -124,17 +150,19 @@ const announce = async (announcement: Announcement) => {
   }
   const elapsed = timer();
   const stopTyping = slack.startTyping(origin.channel, origin.thread_ts);
+  let turn: Turn | undefined;
   try {
-    const text = await kevin.announce(announcement);
-    if (!text) {
-      scope.warn("No HuddleFM announcement produced; nothing sent", { ms: elapsed() });
+    turn = await kevin.announce(announcement);
+    if (turn.action === "silent" || !turn.text) {
+      scope.info("No HuddleFM announcement sent", { reason: turn.action === "silent" ? preview(turn.reason, 200) : "reactions-only", ms: elapsed() });
       return;
     }
-    const sent = await slack.post(origin.channel, text, origin.thread_ts);
+    const sent = await slack.post(origin.channel, turn.text, origin.thread_ts, turn.broadcast && Boolean(origin.thread_ts));
     if (sent.ts) remember(`${origin.channel}:${sent.ts}`);
-    scope.info("Announced a HuddleFM event", { replyTs: sent.ts, chars: text.length, ms: elapsed() });
+    scope.info("Announced a HuddleFM event", { replyTs: sent.ts, chars: turn.text.length, ms: elapsed() });
   } finally {
     stopTyping();
+    if (turn) await leaveChannels(turn, scope);
   }
 };
 if (huddleFm) huddleFm.onAnnouncement = announce;
