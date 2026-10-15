@@ -246,6 +246,25 @@ export class Slack {
       { channel },
       (response) => ({ name: response.channel?.name, private: response.channel?.is_private, members: response.channel?.num_members }),
     );
+    return this.describeChannel(info);
+  }
+
+  /**
+   * Channel details when Kevin can see the channel, else just its ID. Kevin
+   * can be invited to a huddle in a channel He is not in, so not seeing it is
+   * expected there, not an error.
+   */
+  async channelInfoIfVisible(channel: string) {
+    try {
+      const { channel: info } = await this.web.conversations.info({ channel });
+      return this.describeChannel(info);
+    } catch (error) {
+      log.debug("Channel not visible to Kevin", { channel, error: error instanceof Error ? error.message : String(error) });
+      return { id: channel, visibleToKevin: false };
+    }
+  }
+
+  private describeChannel(info?: Awaited<ReturnType<WebClient["conversations"]["info"]>>["channel"]) {
     return {
       id: info?.id,
       name: info?.name,

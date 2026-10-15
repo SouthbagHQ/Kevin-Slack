@@ -4,7 +4,7 @@ import { LISTEN_RATE, Listener, normalizedVolume, slackUserFromExternal, wav, ty
 import { parseRtp, rtpPacket } from "../src/huddle/rtp.js";
 import { isNoise } from "../src/huddle/session.js";
 import { decodeFrame, encodeFrame } from "../src/huddle/signaling.js";
-import { pcm16ToFloat48k, speakable, type SpeechClient } from "../src/huddle/speech.js";
+import { pcm16ToFloat48k, readPcm, speakable, type SpeechClient } from "../src/huddle/speech.js";
 
 const freeWilly = {
   meeting: { MeetingId: "m", MediaPlacement: { SignalingUrl: "wss://signal.example", AudioHostUrl: "audio.example:3478" }, MeetingFeatures: null },
@@ -111,6 +111,16 @@ describe("speech", () => {
     const out = pcm16ToFloat48k(pcm, 24_000);
     expect(out).toHaveLength(4);
     expect(out[0]).toBeCloseTo(0.5);
+  });
+
+  it("reads speech audio as raw PCM, with a rate from the content type, or from a WAV header", () => {
+    const raw = new Uint8Array(8);
+    expect(readPcm(raw, "audio/pcm", 24_000).sampleRate).toBe(24_000);
+    expect(readPcm(raw, "audio/L16;rate=16000", 24_000).sampleRate).toBe(16_000);
+    const file = wav(new Int16Array([1, 2, 3]), 22_050);
+    const read = readPcm(file, "audio/wav", 24_000);
+    expect(read.sampleRate).toBe(22_050);
+    expect(read.pcm.length).toBe(6);
   });
 
   it("turns mrkdwn into speech", () => {

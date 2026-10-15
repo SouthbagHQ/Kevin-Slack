@@ -658,7 +658,7 @@ export class KevinAgent {
     scope.info("Composing a spoken turn", { model: config.replyModel, lines: input.transcript.length });
     const [memory, channel, music] = await Promise.all([
       this.memory.list(),
-      this.slack.channelInfo(input.channel).catch(() => ({ id: input.channel } as Awaited<ReturnType<Slack["channelInfo"]>>)),
+      this.slack.channelInfoIfVisible(input.channel),
       this.musicContext(input.channel, scope),
     ]);
     const huddle = {
@@ -672,11 +672,12 @@ export class KevinAgent {
       { role: "system", content: `${this.systemPrompt(memory, input.latest?.text ?? "", scope)}\n\n${VOICE_PROMPT}` },
       {
         role: "user",
-        content: `Kevin is in a Slack huddle. Decide whether He speaks now. Call respond with the words He says aloud, or stay_silent.\n\nHuddle (speech is machine-transcribed, oldest first; speakerId is a Slack user ID when known):\n${JSON.stringify(huddle)}\n\nThe huddle's conversation:\n${JSON.stringify(this.channelContext(channel))}${this.musicSection(music)}`,
+        content: `Kevin is in a Slack huddle. Decide whether He speaks now. Call respond with the words He says aloud, or stay_silent.\n\nHuddle (speech is machine-transcribed, oldest first; speakerId is a Slack user ID when known):\n${JSON.stringify(huddle)}\n\nThe huddle's conversation:\n${JSON.stringify("visibleToKevin" in channel ? channel : this.channelContext(channel))}${this.musicSection(music)}`,
       },
     ];
     const context: ToolContext = { origin: { channel: input.channel, requester: input.latest?.speakerId, request: input.latest?.text }, huddle: { channel: input.channel, leave: false } };
-    const turn = await this.generate(messages, scope, elapsed, context);
+    // Low reasoning effort: on a call, a long pause is worse than a plainer line.
+    const turn = await this.generate(messages, scope, elapsed, context, { reasoning: { effort: "low" } });
     return { text: turn.action === "respond" ? turn.text : undefined, leave: context.huddle!.leave };
   }
 
@@ -728,7 +729,7 @@ export class KevinAgent {
     return [system, this.huddleFm ? HUDDLEFM_PROMPT : "", this.huddles ? HUDDLE_PROMPT : ""].filter(Boolean).join("\n\n");
   }
 
-  private async generate(messages: Message[], scope: Logger, elapsed: () => number, context: ToolContext): Promise<Turn> {
+  private async generate(messages: Message[], scope: Logger, elapsed: () => number, context: ToolContext, extraBody: Record<string, unknown> = {}): Promise<Turn> {
     const tools = [...baseTools, ...slackTools, ...(this.huddleFm ? huddleFmTools : []), ...(this.huddles ? huddleTools : []), ...terminalTools];
     const logContext = context.message ? messageRef(context.message) : { channel: context.origin?.channel, thread: context.origin?.thread_ts };
     const phase = context.huddle ? "voice" : context.message ? "reply" : "announce";
@@ -753,7 +754,7 @@ export class KevinAgent {
         scope.debug("Tool budget spent; forcing the final action", { round: round + 1 });
         messages.push({ role: "system", content: "Tool lookup is complete. Finish now with respond or stay_silent, using the context already gathered." });
       }
-      const result = await this.ai.chat({ model: config.replyModel, messages, tools: lastRound ? terminalTools : tools, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95 });
+      const result = await this.ai.chat({ ...extraBody, model: config.replyModel, messages, tools: lastRound ? terminalTools : tools, temperature: 0.82 + Math.random() * 0.14, top_p: 0.95 });
       const choice = result.choices[0];
       if (!choice) {
         scope.error("AI returned no reply choice", { round: round + 1, ms: elapsed() });

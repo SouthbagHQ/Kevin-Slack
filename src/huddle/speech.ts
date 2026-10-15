@@ -33,6 +33,28 @@ export const pcm16ToFloat48k = (bytes: Uint8Array, sampleRate: number) => {
   return output;
 };
 
+/**
+ * The 16-bit mono PCM in a speech response and its rate. Providers return raw
+ * PCM, sometimes naming the rate in the content type (audio/L16;rate=24000),
+ * and some wrap it in a WAV file.
+ */
+export const readPcm = (bytes: Uint8Array, contentType: string | null, fallbackRate: number) => {
+  const header = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (header.length >= 12 && header.toString("ascii", 0, 4) === "RIFF" && header.toString("ascii", 8, 12) === "WAVE") {
+    let sampleRate = fallbackRate;
+    for (let offset = 12; offset + 8 <= header.length;) {
+      const id = header.toString("ascii", offset, offset + 4);
+      const size = header.readUInt32LE(offset + 4);
+      if (id === "fmt " && offset + 16 <= header.length) sampleRate = header.readUInt32LE(offset + 12);
+      if (id === "data") return { pcm: bytes.subarray(offset + 8, Math.min(header.length, offset + 8 + size)), sampleRate };
+      offset += 8 + size + (size % 2);
+    }
+    return { pcm: new Uint8Array(0), sampleRate };
+  }
+  const rate = Number(contentType?.match(/rate=(\d+)/i)?.[1]);
+  return { pcm: bytes, sampleRate: rate > 0 ? rate : fallbackRate };
+};
+
 /** What Kevin writes, turned into what a voice can say: no mrkdwn, links read as their labels. */
 export const speakable = (text: string, names: (id: string) => string | undefined = () => undefined) => text
   .replace(/<@([UW][A-Z0-9]+)(?:\|([^>]+))?>/g, (_match, id: string, label?: string) => label ?? names(id) ?? "someone")
@@ -78,8 +100,8 @@ export class SpeechClient {
       instructions: this.config.ttsInstructions,
       response_format: "pcm",
     });
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const samples = pcm16ToFloat48k(bytes, this.config.ttsSampleRate);
+    const audio = readPcm(new Uint8Array(await response.arrayBuffer()), response.headers.get("content-type"), this.config.ttsSampleRate);
+    const samples = pcm16ToFloat48k(audio.pcm, audio.sampleRate);
     log.debug("Synthesized speech", { model: this.config.ttsModel, chars: text.length, seconds: Math.round(samples.length / 480) / 100, ms: elapsed() });
     return samples;
   }
