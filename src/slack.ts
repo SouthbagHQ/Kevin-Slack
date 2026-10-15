@@ -65,6 +65,8 @@ export class Slack {
   private connections = 0;
   private events = 0;
   private handler?: (message: SlackMessage) => Promise<void>;
+  private eventHandler?: (event: Record<string, unknown>) => void;
+  private workspaceUrl?: string;
 
   constructor(private token: string, private cookie: string, private cookieS?: string) {
     this.web = new WebClient(token, { headers: { Cookie: this.cookieHeader() } });
@@ -75,11 +77,53 @@ export class Slack {
     const result = await apiLog.track("auth.test", () => this.web.auth.test());
     if (!result.user_id) throw new Error("Slack auth.test returned no user_id");
     log.info("Slack identity resolved", { userId: result.user_id, team: result.team, teamId: result.team_id, url: result.url });
+    this.workspaceUrl = result.url;
     return { userId: result.user_id, team: result.team };
   }
 
   onMessage(handler: (message: SlackMessage) => Promise<void>) {
     this.handler = handler;
+  }
+
+  /** Every gateway event, messages included, before message handling; huddles listen here. */
+  onEvent(handler: (event: Record<string, unknown>) => void) {
+    this.eventHandler = handler;
+  }
+
+  /**
+   * Calls a Slack web-client API the way the desktop client does: a form post
+   * to the workspace host with the session cookie. Huddle methods only answer
+   * this way. Returns the parsed body, ok or not.
+   */
+  async clientApi(method: string, fields: Record<string, string>, timeoutMs = 15_000) {
+    if (!this.workspaceUrl) throw new Error("Slack identity is not resolved yet");
+    const elapsed = timer();
+    const form = new FormData();
+    for (const [key, value] of Object.entries({ token: this.token, _x_mode: "online", _x_sonic: "true", _x_app_name: "client", ...fields })) form.set(key, value);
+    const response = await fetch(new URL(`/api/${method}`, this.workspaceUrl), {
+      method: "POST",
+      headers: { Cookie: this.cookieHeader() },
+      body: form,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) {
+      apiLog.warn(method, { status: response.status, ms: elapsed() });
+      throw new Error(`${method} HTTP ${response.status}`);
+    }
+    const body = await response.json() as Record<string, unknown>;
+    apiLog.debug(method, { ok: body.ok, error: body.error, ms: elapsed() });
+    return body;
+  }
+
+  /** Raw recent messages, for fields the formatted history leaves out (huddle rooms). */
+  async rawHistory(channel: string, limit = 30) {
+    const result = await apiLog.track("conversations.history", () => this.web.conversations.history({ channel, limit: Math.min(limit, 100) }), { channel, limit, raw: true });
+    return (result.messages ?? []) as Record<string, unknown>[];
+  }
+
+  /** A user's display name, falling back to their ID. */
+  displayName(user?: string) {
+    return this.name(user);
   }
 
   async start() {
@@ -562,6 +606,13 @@ export class Slack {
       socket.on("message", (data) => {
         try {
           const event = JSON.parse(data.toString()) as SlackMessage & { type?: string };
+          if (this.eventHandler) {
+            try {
+              this.eventHandler(event as unknown as Record<string, unknown>);
+            } catch (error) {
+              gatewayLog.failure("Gateway event handler failed", error, { type: event.type ?? "unknown" });
+            }
+          }
           if (event.type !== "message") {
             gatewayLog.trace("Gateway event ignored", { type: event.type ?? "unknown", bytes: data.toString().length });
             return;

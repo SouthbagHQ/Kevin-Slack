@@ -5,6 +5,9 @@ import { ChannelModes } from "./channel-modes.js";
 import { config, configSummary } from "./config.js";
 import { ConversationQueue } from "./conversation-queue.js";
 import { HuddleFm, type Announcement } from "./huddlefm.js";
+import { Huddles } from "./huddle/huddles.js";
+import { SpeechClient } from "./huddle/speech.js";
+import { OPENROUTER_BASE } from "./chat.js";
 import { createLogger, getLogLevel, preview, setLogFormat, setLogLevel, timer } from "./logger.js";
 import { MemoryStore } from "./memory.js";
 import { isBotMessage, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
@@ -39,8 +42,25 @@ const huddleFm = config.huddleFmUserId
     post: async (channel, text) => (await slack.postVerbatim(channel, text)).ts,
   }, config.huddleFmUserId, config.huddleFmFile).load()
   : undefined;
-const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId, huddleFm);
-log.info("Kevin connected", { team: team ?? "Slack", userId, autoMode: channelModes.list(), huddleFm: config.huddleFmUserId ?? "off", logLevel: getLogLevel() });
+const huddles = config.huddles
+  ? new Huddles(slack, new SpeechClient({
+    apiKey: config.openRouterKey,
+    baseUrl: OPENROUTER_BASE,
+    sttModel: config.sttModel,
+    ttsModel: config.ttsModel,
+    ttsVoice: config.ttsVoice,
+    ttsSampleRate: config.ttsSampleRate,
+    ttsInstructions: "Flat, low, unhurried corporate executive. Quietly menacing understatement. Never cheerful.",
+    language: config.huddleLanguage,
+  }), userId, { region: config.huddleRegion, maxSessions: config.huddleMaxSessions, acceptInvites: config.huddleAcceptInvites })
+  : undefined;
+const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId, huddleFm, huddles);
+if (huddles) {
+  huddles.onVoiceTurn = (input) => kevin.voiceTurn(input);
+  slack.onEvent((event) => huddles.handleEvent(event));
+  huddles.start();
+}
+log.info("Kevin connected", { team: team ?? "Slack", userId, autoMode: channelModes.list(), huddleFm: config.huddleFmUserId ?? "off", huddles: Boolean(huddles), logLevel: getLogLevel() });
 
 type Incoming = { message: SlackMessage; pinged: boolean; dm: boolean };
 
@@ -266,6 +286,7 @@ process.on("uncaughtException", (error) => log.failure("Uncaught exception", err
 const shutdown = async (signal: string) => {
   log.info("Shutting down", { signal });
   huddleFm?.stop();
+  await huddles?.stop().catch((error) => log.failure("Leaving huddles on shutdown failed", error));
   try {
     await slack.stop();
   } catch (error) {
