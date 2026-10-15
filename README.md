@@ -19,6 +19,7 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Slack work is queued per thread, DM, or top-level sender. Up to four conversations run concurrently, and consecutive messages from one user are combined after a short debounce instead of producing one reply each.
 - Kevin may reply to other bots. After ten consecutive Kevin↔bot replies in a thread, DM, or channel with no human message in between, He stops until a human speaks again (override with `MAX_BOT_EXCHANGES`).
 - Kevin can run the music in Slack huddles through [HuddleFM](https://github.com/ingoau/huddlefm/blob/main/docs/bot-api.md). See [HuddleFM](#huddlefm).
+- Kevin can join Slack huddles, listen, and talk. See [Huddles](#huddles).
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
 
 ## HuddleFM
@@ -30,6 +31,19 @@ Set `HUDDLEFM_USER_ID` to the HuddleFM Slack user's ID, and add Kevin's user ID 
 - While Kevin controls a session, every reply in a conversation tied to it includes the live status: what is playing, the queue, volume, and recent activity. Music talk in that channel counts as relevant in auto mode.
 - Kevin notices when a song He queued fails, or when someone else skips or removes it. He says so at most once every three minutes per huddle.
 - Commands and replies travel as JSON DMs between Kevin and the HuddleFM user. Those DMs are never treated as conversation. Kevin keeps grants in `HUDDLEFM_FILE` (default `./data/huddlefm.json`) across restarts. When HuddleFM restarts and drops them, Kevin asks again for up to ten minutes.
+
+## Huddles
+
+Kevin joins huddles as Himself, using the same user session, and connects to the huddle's Amazon Chime meeting directly (no browser): Chime signaling over WebSocket and a relay-only WebRTC peer through `node-datachannel`, ported from [HuddleFM's native media backend](https://github.com/ingoau/huddlefm/tree/main/src/native-media) without the video card.
+
+- *Invites:* invite Kevin to a huddle and He joins with the credentials the invitation carries, so He does not need to be in the channel. Set `HUDDLE_ACCEPT_INVITES=off` to stop that.
+- *On request:* in chat, Kevin can check whether a huddle is running in a conversation and who is in it (`huddle_status`), join the running huddle (`join_huddle`; He only starts a new one when explicitly asked), leave (`leave_huddle`), and say something aloud from a text conversation (`speak_in_huddle`). Joining this way needs Kevin to be able to see the conversation; He joins public channels by Himself.
+- *Listening:* the meeting's mixed audio is decoded, split into utterances by a voice detector, and transcribed with `openai/gpt-4o-mini-transcribe`. Chime's per-attendee volume levels say who was speaking.
+- *Talking:* Kevin considers speaking when someone says His name, when He is alone with one person, right after He has spoken, and when He arrives. He may also stay silent. Replies are short, spoken in His voice by `openai/gpt-4o-mini-tts-2025-12-15` (voice `onyx`), and come from the same model, memory, and tools as His Slack replies; Slack messages in a channel where He is in the huddle see who is present and what was recently said.
+- *Leaving:* Kevin leaves when the huddle ends, when He has been alone for about a minute, when asked, or on shutdown. He is in at most `HUDDLE_MAX_SESSIONS` huddles at once (default 2) and declines invitations beyond that.
+- Transcripts stay in memory (the last 60 lines per huddle) and are never posted or saved. Logs record only their size and a short preview at `info`.
+
+Speech goes through OpenRouter's audio endpoints with `OPENROUTER_KEY` (Hack Club AI has none). Override with `HUDDLE_STT_MODEL`, `HUDDLE_TTS_MODEL`, `HUDDLE_TTS_VOICE`, `HUDDLE_TTS_SAMPLE_RATE` (sample rate of the model's 16-bit mono PCM, default 24000), and `HUDDLE_LANGUAGE` (ISO-639-1, auto-detected when unset). `CHIME_MEDIA_REGION` (default `ap-southeast-2`) picks where Slack starts a huddle Kevin begins. `HUDDLES=off` turns all of it off.
 
 ## Logs
 
