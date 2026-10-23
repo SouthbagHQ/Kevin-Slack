@@ -81,3 +81,36 @@ describe("KevinAgent.respond", () => {
     expect(chat.mock.calls.at(-1)![0].tools!.map(({ function: { name } }) => name)).toEqual(["respond", "stay_silent"]);
   });
 });
+
+describe("KevinAgent in His own channel", () => {
+  const own = (...turns: ChatCompletion[]) => {
+    const { slack, chat } = setup();
+    Object.assign(slack, { displayName: vi.fn(async (user: string) => `name-${user}`) });
+    const memory = { list: async () => [{ id: "m1", content: "Slack user UBOB (Bob) owes Kevin a report." }], save: vi.fn(async (content: string) => ({ id: "m2", content })) };
+    const agent = new KevinAgent(slack as never, memory as never, {} as never, "UKEVIN", undefined, undefined, { channel: "CKEVIN", timezone: "UTC" });
+    chat.mockImplementation(async () => turns.shift() ?? textTurn(""));
+    Object.assign(agent, { ai: { chat } });
+    return { agent, slack, chat, memory };
+  };
+
+  it("lets a scheduled post use the same tools as a reply, and thread under a message", async () => {
+    const { agent, slack, chat, memory } = own(
+      toolTurn(call("send_dm", { user: "UBOB", text: "The report." }), call("save_memory", { content: "Slack user UBOB (Bob) was chased for the report." })),
+      toolTurn(call("respond", { text: "Bob has been reminded.", thread_ts: "5.0", reactions: ["eyes"] })),
+    );
+    expect(await agent.muse()).toMatchObject({ action: "respond", text: "Bob has been reminded.", threadTs: "5.0", reactions: ["eyes"] });
+    expect(slack.post).toHaveBeenCalledWith("D9", "The report.");
+    expect(memory.save).toHaveBeenCalled();
+    const offered = chat.mock.calls[0]![0].tools!.map(({ function: { name } }) => name);
+    expect(offered).toEqual(expect.arrayContaining(["get_channel_history", "save_memory", "send_dm", "add_reaction", "pin_message", "respond", "stay_silent"]));
+  });
+
+  it("shows departures with who and when, and can answer one in its thread", async () => {
+    const { agent, chat } = own(toolTurn(call("respond", { text: "Noted.", thread_ts: "7.0" })));
+    const turn = await agent.observe([{ kind: "channel_leave", user: "UBOB", ts: "7.0", at: Date.now() }]);
+    expect(turn).toMatchObject({ action: "respond", text: "Noted.", threadTs: "7.0" });
+    const prompt = (chat.mock.calls[0]![0].messages[1] as { content: string }).content;
+    expect(prompt).toContain('"what":"left the channel"');
+    expect(prompt).toContain('"messageTs":"7.0"');
+  });
+});

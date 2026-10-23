@@ -174,4 +174,33 @@ describe("Slack", () => {
     expect(list).toHaveBeenCalledWith({ include_users: true, include_count: true });
     expect(await slack.userGroups()).toEqual([{ id: "S1", handle: "finance", name: "Finance", description: undefined, members: 2 }]);
   });
+
+  it("adds a user to a user group without dropping its members, one change at a time", async () => {
+    const slack = new Slack("token", "cookie");
+    let members = ["U1"];
+    const list = vi.fn(async () => ({ ok: true, users: [...members] }));
+    const update = vi.fn(async ({ users }: { users: string }) => {
+      members = users.split(",");
+      return { ok: true };
+    });
+    Object.assign(slack.web, { usergroups: { users: { list, update } } });
+
+    const [first, second] = await Promise.all([slack.addToUserGroup("S1", "U2"), slack.addToUserGroup("S1", "U3")]);
+    expect(first).toEqual({ ok: true, added: true });
+    expect(second).toEqual({ ok: true, added: true });
+    expect(members).toEqual(["U1", "U2", "U3"]);
+    expect(await slack.addToUserGroup("S1", "U2")).toEqual({ ok: true, alreadyMember: true });
+    expect(update).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a user group be pinged only in the channel it is allowed in", async () => {
+    const slack = new Slack("token", "cookie");
+    const postMessage = vi.fn(async (_args: { channel: string; text: string }) => ({ ok: true, ts: "1.0" }));
+    Object.assign(slack.web, { chat: { postMessage } });
+    slack.allowGroupPing("CKEVIN", "S1");
+
+    await slack.post("CKEVIN", "<!subteam^S1> Notice.");
+    await slack.post("COTHER", "<!subteam^S1> Notice.");
+    expect(postMessage.mock.calls.map(([args]) => args.text)).toEqual(["<!subteam^S1> Notice.", "@\u2060group Notice."]);
+  });
 });

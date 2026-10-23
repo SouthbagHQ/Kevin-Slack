@@ -2,7 +2,7 @@
 export const MAX_OUTGOING_CHARS = 2000;
 
 const SPECIAL_MENTION = /<!(channel|here|everyone)(?:\|[^>]*)?>/gi;
-const GROUP_MENTION = /<!subteam\^[A-Z0-9]+(?:\|@?([^>]*))?>/gi;
+const GROUP_MENTION = /<!subteam\^([A-Z0-9]+)(?:\|@?([^>]*))?>/gi;
 const PLAIN_MENTION = /(^|[^\w<])@(channel|here|everyone)\b/gi;
 const SPEAKER_LABEL = /^\s*(?:\*\*|\*|_)?Kevin(?:\*\*|\*|_)?\s*:(?:\*\*|\*|_)?\s*/;
 /** A word joiner after "@" keeps the text readable but stops Slack treating it as a mention. */
@@ -26,17 +26,18 @@ const truncate = (text: string) => {
 
 /**
  * The single cleanup every outgoing message passes through: no channel-wide
- * or user-group notifications, Slack formatting instead of Markdown (code left untouched),
- * no "Kevin:" speaker label, and a hard length cap.
+ * or user-group notifications (except groups in `pingable`, left as real
+ * mentions), Slack formatting instead of Markdown (code left untouched), no
+ * "Kevin:" speaker label, and a hard length cap.
  */
-export const formatOutgoing = (raw: string) => {
+export const formatOutgoing = (raw: string, pingable: ReadonlySet<string> = new Set()) => {
   const formatted = raw
     .replace(SPEAKER_LABEL, "")
     .split(CODE)
     .map((part, index) => (index % 2 ? part : toMrkdwn(part)))
     .join("")
     .replace(SPECIAL_MENTION, `${DEFUSE}$1`)
-    .replace(GROUP_MENTION, (_match, handle?: string) => `${DEFUSE}${handle || "group"}`)
+    .replace(GROUP_MENTION, (match, id: string, handle?: string) => (pingable.has(id.toUpperCase()) ? `<!subteam^${id.toUpperCase()}>` : `${DEFUSE}${handle || "group"}`))
     .replace(PLAIN_MENTION, `$1${DEFUSE}$2`)
     .trim();
   return truncate(formatted);

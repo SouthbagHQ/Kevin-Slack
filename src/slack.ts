@@ -65,8 +65,11 @@ export class Slack {
   private connections = 0;
   private events = 0;
   private handler?: (message: SlackMessage) => Promise<void>;
-  private eventHandler?: (event: Record<string, unknown>) => void;
+  private eventHandlers: ((event: Record<string, unknown>) => void)[] = [];
   private workspaceUrl?: string;
+  private userGroupWrites: Promise<void> = Promise.resolve();
+  /** User groups Kevin may genuinely notify, by the channel He may notify them in. */
+  private groupPings = new Map<string, Set<string>>();
 
   constructor(private token: string, private cookie: string, private cookieS?: string) {
     this.web = new WebClient(token, { headers: { Cookie: this.cookieHeader() } });
@@ -85,9 +88,9 @@ export class Slack {
     this.handler = handler;
   }
 
-  /** Every gateway event, messages included, before message handling; huddles listen here. */
+  /** Every gateway event, messages included, before message handling; huddles and Kevin's channel listen here. */
   onEvent(handler: (event: Record<string, unknown>) => void) {
-    this.eventHandler = handler;
+    this.eventHandlers.push(handler);
   }
 
   /**
@@ -345,9 +348,16 @@ export class Slack {
     return true;
   }
 
+  /** Lets Kevin's messages in `channel` notify `usergroup`; everywhere else group mentions stay defused. */
+  allowGroupPing(channel: string, usergroup: string) {
+    const groups = this.groupPings.get(channel) ?? new Set<string>();
+    groups.add(usergroup.toUpperCase());
+    this.groupPings.set(channel, groups);
+  }
+
   /** Every message Kevin writes goes through here, so formatOutgoing is the one place output is cleaned. */
   async post(channel: string, raw: string, threadTs?: string, broadcast = false) {
-    const text = formatOutgoing(raw);
+    const text = formatOutgoing(raw, this.groupPings.get(channel));
     if (!text) throw new Error("Message is empty after formatting; nothing was sent");
     return this.send(channel, text, threadTs, broadcast);
   }
@@ -400,6 +410,22 @@ export class Slack {
       members: group.user_count,
       ...(includeUsers ? { users: (group.users ?? []).slice(0, 100) } : {}),
     }));
+  }
+
+  /**
+   * Adds a user to a user group, keeping its current members. Slack only
+   * replaces the whole member list, so additions run one at a time.
+   */
+  addToUserGroup(usergroup: string, user: string) {
+    const add = this.userGroupWrites.then(async () => {
+      const { users = [] } = await apiLog.track("usergroups.users.list", () => this.web.usergroups.users.list({ usergroup }), { usergroup });
+      if (users.includes(user)) return { ok: true, alreadyMember: true };
+      await apiLog.track("usergroups.users.update", () => this.web.usergroups.users.update({ usergroup, users: [...users, user].join(",") }), { usergroup, user, members: users.length + 1 });
+      log.info("Added a user to a user group", { usergroup, user, members: users.length + 1 });
+      return { ok: true, added: true };
+    });
+    this.userGroupWrites = add.then(() => undefined, () => undefined);
+    return add;
   }
 
   /** Profile fields worth showing the model; email and phone are deliberately left out. */
@@ -625,9 +651,9 @@ export class Slack {
       socket.on("message", (data) => {
         try {
           const event = JSON.parse(data.toString()) as SlackMessage & { type?: string };
-          if (this.eventHandler) {
+          for (const handler of this.eventHandlers) {
             try {
-              this.eventHandler(event as unknown as Record<string, unknown>);
+              handler(event as unknown as Record<string, unknown>);
             } catch (error) {
               gatewayLog.failure("Gateway event handler failed", error, { type: event.type ?? "unknown" });
             }

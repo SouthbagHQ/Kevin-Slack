@@ -49,6 +49,16 @@ describe("parseRespond", () => {
     expect(parseRespond({ text: "x", in_thread: "yes" })).toMatchObject({ ok: false });
     expect(parseRespond({ text: "x", in_thread: false, broadcast: true })).toMatchObject({ ok: false });
     expect(parseRespond({ reactions: ["eyes"], broadcast: true })).toMatchObject({ ok: false });
+    expect(parseRespond({ text: "x", thread_ts: "yesterday" })).toMatchObject({ ok: false });
+    expect(parseRespond({ text: "x", thread_ts: "1.0", in_thread: false })).toMatchObject({ ok: false });
+  });
+
+  it("threads under a named message", () => {
+    expect(parseRespond({ text: "Noted.", thread_ts: "1712345678.000100" })).toEqual({
+      ok: true,
+      outcome: { action: "respond", text: "Noted.", reactions: [], threadTs: "1712345678.000100", broadcast: false },
+    });
+    expect(replyThread({ ts: "2.0" }, undefined, "1.0")).toBe("1.0");
   });
 
   it("records a reason for silence", () => {

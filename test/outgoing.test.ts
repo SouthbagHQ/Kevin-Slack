@@ -11,6 +11,7 @@ describe("formatOutgoing", () => {
 
   it("defuses user-group mentions but keeps user mentions", () => {
     expect(formatOutgoing("<@U123>, <!subteam^S123|@finance> and <!subteam^S456>")).toBe("<@U123>, @\u2060finance and @\u2060group");
+    expect(formatOutgoing("<!subteam^S123|@finance> and <!subteam^S456>", new Set(["S456"]))).toBe("@\u2060finance and <!subteam^S456>");
   });
 
   it("rewrites Markdown as Slack mrkdwn outside code", () => {

@@ -2,6 +2,7 @@ import { Application, createDecoder, createEncoder, Signal, type OpusDecoderHand
 import { createLogger, type Logger } from "../logger.js";
 import { ChimeLink, statusCodes, type ChimeAttendee, type ChimeMeeting } from "./chime-link.js";
 import { LISTEN_RATE, Listener, wav, type Utterance } from "./listener.js";
+import { muteRequest, PEER_TOPIC } from "./peer-message.js";
 import type { SpeechClient } from "./speech.js";
 
 const FRAME = 960; // 20 ms at 48 kHz
@@ -79,9 +80,21 @@ export class HuddleSession {
     return this.listener.inSpeech;
   }
 
-  /** Attendees Chime lists besides Kevin, with Slack IDs when it gives them. */
+  /** Attendees Chime lists besides Kevin, with Slack IDs and mute state when it gives them. */
   attendees() {
     return this.listener.attendees();
+  }
+
+  /**
+   * Asks every client a Slack user is connected from to mute itself, the way
+   * Slack's own "Mute" menu item does. Returns how many attendees were asked.
+   */
+  requestMute(slackUserId: string) {
+    const targets = this.attendees().filter((attendee) => attendee.slackUserId === slackUserId);
+    let sent = 0;
+    for (const { attendeeId } of targets) if (this.link.sendData(PEER_TOPIC, muteRequest(attendeeId, this.link.attendeeId))) sent++;
+    this.log.info("Asked a participant to mute", { user: slackUserId, attendees: targets.length, sent });
+    return { attendees: targets.length, sent };
   }
 
   async start() {

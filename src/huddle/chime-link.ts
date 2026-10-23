@@ -136,6 +136,13 @@ export class ChimeLink {
     return sent;
   }
 
+  /** Sends a Chime data message over signaling, as the JS SDK does; false if the connection is not open. */
+  sendData(topic: string, data: Uint8Array, lifetimeMs = 0) {
+    const connection = this.connection;
+    if (!connection?.open) return false;
+    return connection.signaling.send("DATA_MESSAGE", { data_message: { messages: [{ topic, data, lifetime_ms: lifetimeMs }] } });
+  }
+
   async leave(timeoutMs = 3_000) {
     this.stopping = true;
     clearInterval(this.watchdog);

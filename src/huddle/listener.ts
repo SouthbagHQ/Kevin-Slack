@@ -52,7 +52,7 @@ export class Listener {
   private voicedMs = 0;
   private floor = 0.004;
   private lastAudioAt = 0;
-  private streams = new Map<number, { attendeeId: string; external?: string }>();
+  private streams = new Map<number, { attendeeId: string; external?: string; muted?: boolean }>();
   private loudness = new Map<string, number>();
   private options: Required<ListenerOptions>;
 
@@ -60,11 +60,14 @@ export class Listener {
     this.options = { endSilenceMs: 800, minSpeechMs: 350, maxUtteranceMs: 30_000, preRollMs: 300, minRms: 0.01, ...options };
   }
 
-  /** Attendees Chime currently lists, other than Kevin. */
+  /** Attendees Chime currently lists, other than Kevin, with their mute state when Chime has reported it. */
   attendees() {
-    const seen = new Map<string, string | undefined>();
-    for (const { attendeeId, external } of this.streams.values()) if (attendeeId !== this.selfAttendeeId) seen.set(attendeeId, slackUserFromExternal(external));
-    return [...seen].map(([attendeeId, slackUserId]) => ({ attendeeId, slackUserId }));
+    const seen = new Map<string, { attendeeId: string; slackUserId?: string; muted?: boolean }>();
+    for (const { attendeeId, external, muted } of this.streams.values()) {
+      if (attendeeId === this.selfAttendeeId) continue;
+      seen.set(attendeeId, { attendeeId, slackUserId: slackUserFromExternal(external), ...(muted !== undefined ? { muted } : {}) });
+    }
+    return [...seen.values()];
   }
 
   get inSpeech() {
@@ -94,8 +97,12 @@ export class Listener {
 
   handleFrame(frame: SignalFrame) {
     for (const stream of frame.audio_stream_id_info?.streams ?? []) {
-      if (stream.attendee_id) this.streams.set(stream.audio_stream_id, { attendeeId: stream.attendee_id, external: stream.external_user_id });
-      else if (stream.muted === undefined) this.streams.delete(stream.audio_stream_id);
+      const known = this.streams.get(stream.audio_stream_id);
+      // An entry with an attendee announces a stream; one with only a mute state changes it; one with neither is a stream leaving.
+      if (stream.attendee_id) this.streams.set(stream.audio_stream_id, { attendeeId: stream.attendee_id, external: stream.external_user_id, muted: stream.muted ?? known?.muted });
+      else if (stream.muted !== undefined) {
+        if (known) known.muted = stream.muted;
+      } else this.streams.delete(stream.audio_stream_id);
     }
     if (!this.speaking) return;
     for (const state of frame.audio_metadata?.attendee_states ?? []) {

@@ -11,6 +11,8 @@ const FOLLOW_UP_MS = 25_000;
 const PARTICIPANT_POLL_MS = 30_000;
 /** Kevin leaves after this many polls in a row find Him alone. */
 const ALONE_POLLS = 2;
+/** How long to watch for Chime to report a participant muted after asking. */
+const MUTE_CONFIRM_MS = 3_000;
 
 type Json = Record<string, unknown>;
 
@@ -99,11 +101,14 @@ export const activeRoomFromHistory = (messages: Json[]) => {
 
 export type VoiceTrigger = "addressed" | "follow-up" | "direct" | "joined";
 
+/** Someone in a huddle besides Kevin; `muted` is present once Chime has reported it. */
+export type Participant = { id: string; name: string; muted?: boolean };
+
 export type VoiceTurnInput = {
   channel: string;
   trigger: VoiceTrigger;
   invitedBy?: string;
-  participants: { id: string; name: string }[];
+  participants: Participant[];
   transcript: { speaker: string; speakerId?: string; text: string; secondsAgo: number; kevin?: boolean }[];
   latest?: { speaker: string; speakerId?: string; text: string };
 };
@@ -188,7 +193,7 @@ export class Huddles {
         channel,
         inProgress: true,
         kevinPresent: true,
-        participants: await this.named(session.participants.filter((id) => id !== this.kevinId)),
+        participants: await this.present(session),
         startedBy: session.createdBy,
         kevinJoinedMinutesAgo: Math.round((Date.now() - session.joinedAt) / 60_000),
       };
@@ -257,6 +262,27 @@ export class Huddles {
     return { ok: true, seconds: Math.round(samples.length / 4_800) / 10 };
   }
 
+  /**
+   * Mutes someone in a huddle Kevin is in, the way Slack's own "Mute" does:
+   * their client is asked to turn off its microphone. They can unmute
+   * themselves. Reports whether Chime then showed them muted.
+   */
+  async mute(channel: string, user: string) {
+    const session = this.session(channel);
+    if (!session) return { ok: false, error: "not_in_huddle", message: "Kevin is not in a huddle there." };
+    if (user === this.kevinId) return { ok: false, error: "self", message: "That is Kevin." };
+    const attendees = session.attendees().filter((attendee) => attendee.slackUserId === user);
+    if (!attendees.length) return { ok: false, error: "not_present", message: "That person is not connected to this huddle.", participants: await this.present(session) };
+    if (attendees.every((attendee) => attendee.muted === true)) return { ok: true, alreadyMuted: true };
+    const { sent } = session.requestMute(user);
+    if (!sent) return { ok: false, error: "not_connected", message: "Kevin's huddle connection is not ready." };
+    for (let waited = 0; waited < MUTE_CONFIRM_MS; waited += 200) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      if (session.attendees().some((attendee) => attendee.slackUserId === user && attendee.muted === true)) return { ok: true, muted: true };
+    }
+    return { ok: true, muted: "unconfirmed", note: "The request was sent, but Chime has not shown them muted yet." };
+  }
+
   /** Live huddle context for a text reply in the huddle's channel. */
   async context(channel: string) {
     const session = this.session(channel);
@@ -264,7 +290,7 @@ export class Huddles {
     return {
       huddleChannel: channel,
       kevinPresent: true,
-      participants: await this.named(session.participants.filter((id) => id !== this.kevinId)),
+      participants: await this.present(session),
       recentSpeech: await this.lines(session.transcript.slice(-20)),
     };
   }
@@ -382,7 +408,7 @@ export class Huddles {
         channel: session.channel,
         trigger,
         invitedBy: this.invitedBy.get(session),
-        participants: await this.named(session.participants.filter((id) => id !== this.kevinId)),
+        participants: await this.present(session),
         transcript,
         ...(latest ? { latest: { speaker: latest.speaker ? await this.slack.displayName(latest.speaker) : "someone", speakerId: latest.speaker, text: latest.text } } : {}),
       };
@@ -428,6 +454,17 @@ export class Huddles {
     const ids = [...new Set([...text.matchAll(/<@([UW][A-Z0-9]+)>/g)].map((match) => match[1]!))];
     const names = new Map(await Promise.all(ids.map(async (id) => [id, await this.slack.displayName(id)] as const)));
     return speakable(text, (id) => names.get(id));
+  }
+
+  /** Everyone in the huddle besides Kevin, with mute state from Chime where it has said. */
+  private async present(session: HuddleSession) {
+    const muted = new Map<string, boolean>();
+    for (const { slackUserId, muted: state } of session.attendees()) {
+      // Connected from several devices: muted only when every one is.
+      if (slackUserId && state !== undefined) muted.set(slackUserId, (muted.get(slackUserId) ?? true) && state);
+    }
+    const people: Participant[] = await this.named(session.participants.filter((id) => id !== this.kevinId));
+    return people.map((person) => (muted.has(person.id) ? { ...person, muted: muted.get(person.id) } : person));
   }
 
   private named(ids: string[]) {

@@ -4,7 +4,9 @@ import { BotExchanges, botExchangeKey } from "./bot-exchanges.js";
 import { ChannelModes } from "./channel-modes.js";
 import { config, configSummary } from "./config.js";
 import { ConversationQueue } from "./conversation-queue.js";
+import { parseCron } from "./cron.js";
 import { HuddleFm, type Announcement } from "./huddlefm.js";
+import { KevinChannel } from "./kevin-channel.js";
 import { Huddles } from "./huddle/huddles.js";
 import { SpeechClient } from "./huddle/speech.js";
 import { OPENROUTER_BASE } from "./chat.js";
@@ -54,7 +56,24 @@ const huddles = config.huddles
     language: config.huddleLanguage,
   }), userId, { region: config.huddleRegion, maxSessions: config.huddleMaxSessions, acceptInvites: config.huddleAcceptInvites })
   : undefined;
-const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId, huddleFm, huddles);
+/** The group's handle, so Kevin can name it; the ID alone still works if Slack will not list groups. */
+const userGroupHandle = async (id: string) => {
+  try {
+    return (await slack.userGroups()).find((group) => group.id === id)?.handle;
+  } catch (error) {
+    log.warn("Could not look up Kevin's channel user group", { usergroup: id, error: error instanceof Error ? error.message : String(error) });
+    return undefined;
+  }
+};
+const ownChannel = config.kevinChannel ? {
+  channel: config.kevinChannel,
+  timezone: config.kevinChannelTimezone,
+  ...(config.kevinChannelUserGroup ? { userGroup: { id: config.kevinChannelUserGroup, handle: await userGroupHandle(config.kevinChannelUserGroup) } } : {}),
+} : undefined;
+if (ownChannel?.userGroup) slack.allowGroupPing(ownChannel.channel, ownChannel.userGroup.id);
+// Parsed before connecting so a bad schedule fails at startup, not at the first tick.
+const ownSchedule = ownChannel ? parseCron(config.kevinChannelCron, ownChannel.timezone) : undefined;
+const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId, huddleFm, huddles, ownChannel);
 if (huddles) {
   huddles.onVoiceTurn = (input) => kevin.voiceTurn(input);
   slack.onEvent((event) => huddles.handleEvent(event));
@@ -76,7 +95,7 @@ const leaveChannels = async (turn: Turn, scope: typeof reply) => {
 };
 
 /** Reactions land on the message being answered; one bad emoji does not stop the rest or the reply. */
-const addReactions = async (message: SlackMessage, reactions: string[], scope: typeof reply) => {
+const addReactions = async (message: Pick<SlackMessage, "channel" | "ts">, reactions: string[], scope: typeof reply) => {
   let added = 0;
   for (const emoji of reactions) {
     try {
@@ -102,7 +121,8 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   const fromBot = values.some((item) => isBotMessage(item.message));
   const exchangeKey = botExchangeKey(message);
   const threadKey = `${message.channel}:${message.thread_ts ?? message.ts}`;
-  const trigger = pinged ? "ping" : dm ? "dm" : "auto";
+  const own = message.channel === config.kevinChannel;
+  const trigger = pinged ? "ping" : dm ? "dm" : own ? "own-channel" : "auto";
   const scope = reply.with({ ...messageRef(message), trigger });
   scope.info("Handling conversation", { messages: values.length, omitted, combined, fromBot, conversation: exchangeKey });
 
@@ -115,8 +135,9 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
     return;
   }
 
-  const classify = shouldClassifyRelevance({ pinged, dm, autoMode: channelModes.isEnabled(message.channel) });
-  const relevant = classify ? await kevin.relevant(message) : false;
+  // Kevin watches His own channel Himself; the reply model decides whether to speak.
+  const classify = !own && shouldClassifyRelevance({ pinged, dm, autoMode: channelModes.isEnabled(message.channel) });
+  const relevant = own || (classify ? await kevin.relevant(message) : false);
   if (!pinged && !dm && !relevant) {
     scope.info("Skipped; not relevant", { classified: classify, ms: elapsed() });
     return;
@@ -135,7 +156,7 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
       return;
     }
     const reactions = await addReactions(message, turn.reactions, scope);
-    const sent = turn.text ? await slack.post(message.channel, turn.text, replyThread(message, turn.inThread), turn.broadcast) : undefined;
+    const sent = turn.text ? await slack.post(message.channel, turn.text, replyThread(message, turn.inThread, turn.threadTs), turn.broadcast) : undefined;
     if (sent?.ts) remember(`${message.channel}:${sent.ts}`);
     if (sent && fromBot) botExchanges.noteBotReply(exchangeKey);
     scope.info(sent ? "Replied" : "Reacted", {
@@ -186,6 +207,59 @@ const announce = async (announcement: Announcement) => {
   }
 };
 if (huddleFm) huddleFm.onAnnouncement = announce;
+
+/** Kevin's unprompted word in His own channel: a scheduled post, or His take on what just happened there. */
+const postInOwnChannel = async (channel: string, phase: "muse" | "observe", compose: () => Promise<Turn>) => {
+  const scope = reply.with({ channel, phase });
+  const elapsed = timer();
+  const stopTyping = slack.startTyping(channel);
+  let turn: Turn | undefined;
+  try {
+    turn = await compose();
+    if (turn.action === "silent") {
+      scope.info("Nothing posted in Kevin's channel", { reason: preview(turn.reason, 200), ms: elapsed() });
+      return;
+    }
+    // With nothing to answer, a thread or reactions need a message Kevin named.
+    const reactions = turn.threadTs ? await addReactions({ channel, ts: turn.threadTs }, turn.reactions, scope) : 0;
+    if (!turn.text) {
+      scope.info(reactions ? "Reacted in Kevin's channel" : "Nothing posted in Kevin's channel", { thread: turn.threadTs, reactions, ms: elapsed() });
+      return;
+    }
+    const sent = await slack.post(channel, turn.text, turn.threadTs, turn.broadcast && Boolean(turn.threadTs));
+    if (sent.ts) remember(`${channel}:${sent.ts}`);
+    scope.info("Posted in Kevin's channel", { replyTs: sent.ts, thread: turn.threadTs, reactions, chars: turn.text.length, ms: elapsed() });
+  } finally {
+    stopTyping();
+    if (turn) await leaveChannels(turn, scope);
+  }
+};
+
+const kevinChannel = ownChannel && ownSchedule
+  ? new KevinChannel({
+    channel: ownChannel.channel,
+    kevinId: userId,
+    schedule: ownSchedule,
+    chance: config.kevinChannelChance,
+    jitterMs: Math.max(0, config.kevinChannelJitterMinutes) * 60_000,
+    muse: () => postInOwnChannel(ownChannel.channel, "muse", () => kevin.muse()),
+    onJoin: config.kevinChannelUserGroup ? async (user) => {
+      const usergroup = config.kevinChannelUserGroup!;
+      try {
+        return { userGroup: usergroup, ...(await slack.addToUserGroup(usergroup, user)) };
+      } catch (error) {
+        log.failure("Adding a newcomer to the user group failed", error, { usergroup, user });
+        return { userGroup: usergroup, ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    } : undefined,
+    observe: (events, omitted) => postInOwnChannel(ownChannel.channel, "observe", () => kevin.observe(events, omitted)),
+  })
+  : undefined;
+if (kevinChannel) {
+  if (!(await slack.ensureChannelAccess(kevinChannel.channel).catch(() => false))) log.warn("Kevin cannot see His own channel; invite Him to it", { channel: kevinChannel.channel });
+  slack.onEvent((event) => kevinChannel.handleEvent(event));
+  kevinChannel.start();
+}
 
 const conversationKey = (message: SlackMessage) => message.thread_ts
   ? `${message.channel}:thread:${message.thread_ts}`
@@ -255,14 +329,15 @@ slack.onMessage(async (message) => {
   }
 
   const auto = channelModes.isEnabled(message.channel);
+  const own = message.channel === config.kevinChannel;
   const dm = message.channel.startsWith("D");
   const subscribed = threadMutes.isSubscribed(threadKey);
-  if (!shouldConsiderMessage({ pinged, dm, autoMode: auto })) {
+  if (!shouldConsiderMessage({ pinged, dm, autoMode: auto || own })) {
     intake.debug("Message dropped", { ...messageRef(message), reason: "not-pinged-dm-or-auto", autoMode: auto, subscribed });
     return;
   }
 
-  const priority = pinged || dm ? 2 : subscribed ? 1 : 0;
+  const priority = pinged || dm ? 2 : subscribed || own ? 1 : 0;
   const accepted = queue.enqueue({
     key: conversationKey(message),
     sender: message.user ?? message.bot_id ?? "unknown",
@@ -271,7 +346,7 @@ slack.onMessage(async (message) => {
   });
   intake.info(accepted ? "Message accepted" : "Message rejected; queue full", {
     ...messageRef(message),
-    trigger: pinged ? "ping" : dm ? "dm" : "auto",
+    trigger: pinged ? "ping" : dm ? "dm" : own ? "own-channel" : "auto",
     priority,
     fromBot,
     subscribed,
@@ -286,6 +361,7 @@ process.on("uncaughtException", (error) => log.failure("Uncaught exception", err
 const shutdown = async (signal: string) => {
   log.info("Shutting down", { signal });
   huddleFm?.stop();
+  kevinChannel?.stop();
   await huddles?.stop().catch((error) => log.failure("Leaving huddles on shutdown failed", error));
   try {
     await slack.stop();

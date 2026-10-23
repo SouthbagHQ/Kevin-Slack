@@ -29,7 +29,7 @@ const deny = (action: string, reason: string, error: string, fields: Record<stri
 
 /** How a turn ends: a reply and/or reactions on the current message, or deliberate silence. */
 export type Outcome =
-  | { action: "respond"; text?: string; reactions: string[]; inThread?: boolean; broadcast: boolean }
+  | { action: "respond"; text?: string; reactions: string[]; inThread?: boolean; threadTs?: string; broadcast: boolean }
   | { action: "silent"; reason: string };
 
 export const TERMINAL_TOOLS = new Set(["respond", "stay_silent"]);
@@ -48,10 +48,15 @@ export const parseRespond = (args: Record<string, unknown>): { ok: true; outcome
     if (args[flag] !== undefined && typeof args[flag] !== "boolean") return deny(action, `invalid-${flag}`, `${flag} must be a boolean.`);
   }
   const inThread = args.in_thread as boolean | undefined;
+  if (args.thread_ts !== undefined && (typeof args.thread_ts !== "string" || !/^\d+\.\d+$/.test(args.thread_ts))) {
+    return deny(action, "invalid-thread_ts", "thread_ts must be an exact message ts like 1712345678.000100.");
+  }
+  const threadTs = args.thread_ts as string | undefined;
+  if (threadTs && inThread === false) return deny(action, "thread-conflict", "thread_ts replies in a thread; drop in_thread: false.");
   const broadcast = args.broadcast === true;
   if (broadcast && inThread === false) return deny(action, "broadcast-without-thread", "broadcast only applies to a thread reply.");
   if (broadcast && !text) return deny(action, "broadcast-without-text", "broadcast requires text.");
-  return { ok: true, outcome: { action: "respond", ...(text ? { text } : {}), reactions: reactions as string[], ...(inThread === undefined ? {} : { inThread }), broadcast } };
+  return { ok: true, outcome: { action: "respond", ...(text ? { text } : {}), reactions: reactions as string[], ...(inThread === undefined ? {} : { inThread }), ...(threadTs ? { threadTs } : {}), broadcast } };
 };
 
 export const parseSilence = (args: Record<string, unknown>): { ok: true; outcome: Outcome } => ({
@@ -60,7 +65,8 @@ export const parseSilence = (args: Record<string, unknown>): { ok: true; outcome
 });
 
 /** Where the respond outcome lands relative to the message being answered. */
-export const replyThread = (message: { ts: string; thread_ts?: string }, inThread?: boolean) => {
+export const replyThread = (message: { ts: string; thread_ts?: string }, inThread?: boolean, threadTs?: string) => {
+  if (threadTs) return threadTs;
   if (inThread === false) return undefined;
   if (inThread === true) return message.thread_ts ?? message.ts;
   return message.thread_ts;
