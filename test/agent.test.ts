@@ -138,3 +138,38 @@ describe("KevinAgent manager commands", () => {
     expect((sent[0]![0] as { content: string }).content).not.toContain("# Manager command");
   });
 });
+
+describe("KevinAgent tool rounds and memory", () => {
+  it("runs a round of lookups concurrently and returns results in call order", async () => {
+    const { agent, slack, sent } = setup(
+      toolTurn(call("get_channel_info", { channel: "C1" }, "a"), call("get_user_info", { user: "UBOB" }, "b")),
+      toolTurn(call("stay_silent", {})),
+    );
+    let inFlight = 0;
+    let peak = 0;
+    const slow = <T>(value: T) => async () => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight--;
+      return value;
+    };
+    slack.channelInfo.mockImplementation(slow({ id: "C1", name: "general" }));
+    slack.userInfo.mockImplementation(slow({ id: "UBOB" }));
+    // No sender ID, so gathering context makes one slow call and only the tool round can make two at once.
+    await agent.respond({ ...message, user: undefined });
+    expect(peak).toBe(2);
+    expect((sent[1]!.slice(-2) as { tool_call_id: string }[]).map(({ tool_call_id }) => tool_call_id)).toEqual(["a", "b"]);
+  });
+
+  it("offers search_memory and says when memories were left out", async () => {
+    const { agent, chat } = setup(toolTurn(call("search_memory", { query: "sharks" })), toolTurn(call("stay_silent", {})));
+    const records = Array.from({ length: 400 }, (_, index) => ({ id: `m${index}`, content: `Filler memory number ${index} about nothing in particular at all.`, createdAt: "2026-01-01T00:00:00.000Z" }));
+    const memory = { list: async () => records, search: vi.fn(async () => [{ id: "m1", content: "Kevin likes sharks." }]) };
+    Object.assign(agent, { memory });
+    await agent.respond(message);
+    const request = chat.mock.calls[0]![0];
+    expect(request.tools!.map(({ function: { name } }) => name)).toContain("search_memory");
+    expect((request.messages[0] as { content: string }).content).toMatch(/older records are not shown/);
+    expect(memory.search).toHaveBeenCalledWith("sharks", undefined);
+  });
+});

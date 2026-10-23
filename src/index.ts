@@ -73,7 +73,10 @@ const ownChannel = config.kevinChannel ? {
 if (ownChannel?.userGroup) slack.allowGroupPing(ownChannel.channel, ownChannel.userGroup.id);
 // Parsed before connecting so a bad schedule fails at startup, not at the first tick.
 const ownSchedule = ownChannel ? parseCron(config.kevinChannelCron, ownChannel.timezone) : undefined;
-const kevin = new KevinAgent(slack, new MemoryStore(config.memoryFile), channelModes, userId, huddleFm, huddles, ownChannel);
+const memory = new MemoryStore(config.memoryFile);
+// Read once at startup so a missing volume or a broken file shows up now, not on the first reply.
+log.info("Memory ready", { file: config.memoryFile, records: (await memory.list()).length });
+const kevin = new KevinAgent(slack, memory, channelModes, userId, huddleFm, huddles, ownChannel);
 if (huddles) {
   huddles.onVoiceTurn = (input) => kevin.voiceTurn(input);
   slack.onEvent((event) => huddles.handleEvent(event));
@@ -364,6 +367,7 @@ const shutdown = async (signal: string) => {
   huddleFm?.stop();
   kevinChannel?.stop();
   await huddles?.stop().catch((error) => log.failure("Leaving huddles on shutdown failed", error));
+  await memory.flush();
   try {
     await slack.stop();
   } catch (error) {

@@ -40,7 +40,7 @@ describe("Slack", () => {
     vi.stubGlobal("fetch", fetch);
     try {
       expect(await slack.viewImage("image_F123")).toEqual({ id: "image_F123", name: "receipt.png", url: "data:image/png;base64,AQID" });
-      expect(fetch).toHaveBeenCalledWith("https://files.slack.com/receipt.png", { headers: { Authorization: "Bearer token", Cookie: "d=cookie" } });
+      expect(fetch).toHaveBeenCalledWith("https://files.slack.com/receipt.png", expect.objectContaining({ headers: { Authorization: "Bearer token", Cookie: "d=cookie" } }));
     } finally {
       vi.unstubAllGlobals();
     }

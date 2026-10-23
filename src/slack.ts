@@ -38,6 +38,34 @@ type ImageSource = { id: string; name?: string; url?: string; fileId?: string };
 const log = createLogger("slack");
 const gatewayLog = log.child("gateway");
 const PIN_CACHE_MS = 60_000;
+const CHANNEL_CACHE_MS = 60_000;
+const USER_CACHE_MS = 5 * 60_000;
+/** Without a reply (Slack answers every ping with a pong) for this long, the socket is presumed dead. */
+const GATEWAY_SILENCE_MS = 100_000;
+const MAX_RECONNECT_DELAY_MS = 60_000;
+
+/** A promise cache that forgets failures and stale entries, so a blip is never remembered. */
+class Expiring<T> {
+  private entries = new Map<string, { at: number; value: Promise<T> }>();
+
+  constructor(private ttlMs: number, private maxEntries = 1_000) {}
+
+  get(key: string, load: () => Promise<T>) {
+    const cached = this.entries.get(key);
+    if (cached && Date.now() - cached.at < this.ttlMs) return cached.value;
+    const value = load();
+    this.entries.set(key, { at: Date.now(), value });
+    value.catch(() => {
+      if (this.entries.get(key)?.value === value) this.entries.delete(key);
+    });
+    if (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value!);
+    return value;
+  }
+
+  delete(key: string) {
+    this.entries.delete(key);
+  }
+}
 const apiLog = log.child("api");
 
 /** Identifying fields of a message, safe to log without its text. */
@@ -52,7 +80,11 @@ export const messageRef = (message: SlackMessage) => ({
 
 export class Slack {
   readonly web: WebClient;
-  private names = new Map<string, Promise<string>>();
+  private names = new Expiring<string>(60 * 60_000, 5_000);
+  private channels = new Expiring<Awaited<ReturnType<WebClient["conversations"]["info"]>>["channel"]>(CHANNEL_CACHE_MS);
+  private users = new Expiring<Awaited<ReturnType<WebClient["users"]["info"]>>["user"]>(USER_CACHE_MS);
+  private reconnectFailures = 0;
+  private lastGatewayMessage = 0;
   private images = new Map<string, ImageSource>();
   private pins = new Map<string, { at: number; timestamps: Promise<Set<string>> }>();
   private profileLabels?: Promise<Map<string, string>>;
@@ -72,7 +104,12 @@ export class Slack {
   private groupPings = new Map<string, Set<string>>();
 
   constructor(private token: string, private cookie: string, private cookieS?: string) {
-    this.web = new WebClient(token, { headers: { Cookie: this.cookieHeader() } });
+    // The default policy retries for about thirty minutes with no timeout, which would stall a turn; fail fast instead.
+    this.web = new WebClient(token, {
+      headers: { Cookie: this.cookieHeader() },
+      timeout: 20_000,
+      retryConfig: { retries: 3, factor: 2, minTimeout: 500, maxTimeout: 5_000, randomize: true },
+    });
     log.debug("Slack client created", { hasSessionCookie: Boolean(cookieS) });
   }
 
@@ -224,7 +261,7 @@ export class Slack {
       log.info("Image passed through as an external URL", { image: id, host: parsed.hostname, ms: elapsed() });
       return { id, name: source.name, url };
     }
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${this.token}`, Cookie: this.cookieHeader() } });
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${this.token}`, Cookie: this.cookieHeader() }, signal: AbortSignal.timeout(20_000) });
     if (!response.ok) {
       log.warn("Slack image download failed", { image: id, host: parsed.hostname, status: response.status, ms: elapsed() });
       throw new Error(`Slack image download failed: ${response.status}`);
@@ -242,14 +279,19 @@ export class Slack {
     return { id, name: source.name, url: `data:${mime};base64,${bytes.toString("base64")}` };
   }
 
+  /** conversations.info, cached for a minute; Kevin's own changes to a channel clear it. */
+  private conversationInfo(channel: string, track = true) {
+    return this.channels.get(channel, async () => {
+      const call = () => this.web.conversations.info({ channel });
+      const { channel: info } = track
+        ? await apiLog.track("conversations.info", call, { channel }, (response) => ({ name: response.channel?.name, private: response.channel?.is_private, members: response.channel?.num_members }))
+        : await call();
+      return info;
+    });
+  }
+
   async channelInfo(channel: string) {
-    const { channel: info } = await apiLog.track(
-      "conversations.info",
-      () => this.web.conversations.info({ channel }),
-      { channel },
-      (response) => ({ name: response.channel?.name, private: response.channel?.is_private, members: response.channel?.num_members }),
-    );
-    return this.describeChannel(info);
+    return this.describeChannel(await this.conversationInfo(channel));
   }
 
   /**
@@ -259,8 +301,7 @@ export class Slack {
    */
   async channelInfoIfVisible(channel: string) {
     try {
-      const { channel: info } = await this.web.conversations.info({ channel });
-      return this.describeChannel(info);
+      return this.describeChannel(await this.conversationInfo(channel, false));
     } catch (error) {
       log.debug("Channel not visible to Kevin", { channel, error: error instanceof Error ? error.message : String(error) });
       return { id: channel, visibleToKevin: false };
@@ -292,13 +333,19 @@ export class Slack {
     return managers;
   }
 
+  /** users.info, cached for a few minutes and shared by profile lookups and author names. */
+  private user(user: string, track = true) {
+    return this.users.get(user, async () => {
+      const call = () => this.web.users.info({ user });
+      const { user: info } = track
+        ? await apiLog.track("users.info", call, { user }, (response) => ({ name: response.user?.name, bot: response.user?.is_bot }))
+        : await call();
+      return info;
+    });
+  }
+
   async userInfo(user: string) {
-    const { user: info } = await apiLog.track(
-      "users.info",
-      () => this.web.users.info({ user }),
-      { user },
-      (response) => ({ name: response.user?.name, bot: response.user?.is_bot }),
-    );
+    const info = await this.user(user);
     return {
       id: info?.id,
       username: info?.name,
@@ -323,16 +370,19 @@ export class Slack {
 
   async kick(channel: string, user: string) {
     await apiLog.track("conversations.kick", () => this.web.conversations.kick({ channel, user }), { channel, user });
+    this.channels.delete(channel);
     log.info("Removed a member from a channel", { channel, user });
   }
 
   async setTopic(channel: string, topic: string) {
     await apiLog.track("conversations.setTopic", () => this.web.conversations.setTopic({ channel, topic }), { channel, chars: topic.length });
+    this.channels.delete(channel);
     log.info("Channel topic changed", { channel, topic: preview(topic, 120) });
   }
 
   async setDescription(channel: string, description: string) {
     await apiLog.track("conversations.setPurpose", () => this.web.conversations.setPurpose({ channel, purpose: description }), { channel, chars: description.length });
+    this.channels.delete(channel);
     log.info("Channel description changed", { channel, description: preview(description, 120) });
   }
 
@@ -344,6 +394,7 @@ export class Slack {
       return false;
     }
     await apiLog.track("conversations.join", () => this.web.conversations.join({ channel }), { channel });
+    this.channels.delete(channel);
     log.info("Joined channel", { channel, name: info.name });
     return true;
   }
@@ -499,6 +550,7 @@ export class Slack {
 
   async leave(channel: string) {
     await apiLog.track("conversations.leave", () => this.web.conversations.leave({ channel }), { channel });
+    this.channels.delete(channel);
     log.info("Left a channel", { channel });
   }
 
@@ -527,18 +579,16 @@ export class Slack {
 
   private async name(user?: string) {
     if (!user) return "unknown";
-    const cached = this.names.get(user);
-    if (cached) return cached;
-    const resolving = this.web.users.info({ user }).then((result) => {
-      const profile = result.user?.profile;
-      return profile?.display_name || profile?.real_name || result.user?.name || user;
-    }).catch((error) => {
+    try {
+      // Names are kept for an hour; a failed lookup is not kept, so the next message tries again.
+      return await this.names.get(user, async () => {
+        const info = await this.user(user, false);
+        return info?.profile?.display_name || info?.profile?.real_name || info?.name || user;
+      });
+    } catch (error) {
       log.debug("Name lookup failed; falling back to the raw ID", { user, error: error instanceof Error ? error.message : String(error) });
       return user;
-    });
-    this.names.set(user, resolving);
-    log.trace("Name lookup started", { user, cached: this.names.size });
-    return resolving;
+    }
   }
 
   private async format(messages: SlackMessage[], channel: string) {
@@ -614,6 +664,7 @@ export class Slack {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: this.cookieHeader() },
       body,
+      signal: AbortSignal.timeout(20_000),
     });
     const boot = await response.json() as { ok: boolean; error?: string; workspaces?: { id: string; domain: string }[] };
     if (!boot.ok) {
@@ -631,6 +682,32 @@ export class Slack {
     return `wss://wss-primary.slack.com/?${query}`;
   }
 
+  /**
+   * Reconnects with exponential backoff and jitter. After a few failures in a
+   * row the gateway URL is fetched again, since a stale one never recovers.
+   */
+  private scheduleReconnect() {
+    clearTimeout(this.reconnect);
+    const failures = this.reconnectFailures++;
+    const delay = Math.min(MAX_RECONNECT_DELAY_MS, 2_000 * 2 ** failures) * (0.75 + Math.random() * 0.5);
+    gatewayLog.info("Reconnecting to the Slack gateway", { attempt: this.connections + 1, failures, delayMs: Math.round(delay) });
+    this.reconnect = setTimeout(async () => {
+      if (this.stopped) return;
+      if (failures >= 3) {
+        try {
+          gatewayLog.info("Refreshing the gateway URL after repeated failures", { failures });
+          this.gateway = await this.gatewayUrl();
+        } catch (error) {
+          gatewayLog.failure("Refreshing the gateway URL failed", error, { failures });
+          this.scheduleReconnect();
+          return;
+        }
+      }
+      // A failed connect closes its socket, and the close handler schedules the next try.
+      this.connect().catch((error) => gatewayLog.failure("Slack reconnect failed", error, { attempt: this.connections, failures: this.reconnectFailures }));
+    }, delay);
+  }
+
   private connect() {
     return new Promise<void>((resolve, reject) => {
       const attempt = ++this.connections;
@@ -644,11 +721,25 @@ export class Slack {
       let opened = false;
       socket.once("open", () => {
         opened = true;
-        this.ping = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify({ type: "ping", id: ++this.outgoingId })), 30_000);
+        this.lastGatewayMessage = Date.now();
+        clearInterval(this.ping);
+        this.ping = setInterval(() => {
+          if (socket.readyState !== WebSocket.OPEN) return;
+          const silentMs = Date.now() - this.lastGatewayMessage;
+          if (silentMs > GATEWAY_SILENCE_MS) {
+            // A half-open socket never closes by itself; end it so the close handler reconnects.
+            gatewayLog.warn("Gateway went silent; dropping the socket", { attempt, silentMs });
+            socket.terminate();
+            return;
+          }
+          socket.send(JSON.stringify({ type: "ping", id: ++this.outgoingId }));
+        }, 30_000);
         gatewayLog.info("Slack browser gateway connected", { attempt, ms: elapsed() });
         resolve();
       });
       socket.on("message", (data) => {
+        this.lastGatewayMessage = Date.now();
+        this.reconnectFailures = 0;
         try {
           const event = JSON.parse(data.toString()) as SlackMessage & { type?: string };
           for (const handler of this.eventHandlers) {
@@ -673,7 +764,7 @@ export class Slack {
           gatewayLog.failure("Invalid Slack gateway event", error, { bytes: data.toString().length, payload: preview(data.toString(), 200) });
         }
       });
-      socket.once("error", (error) => {
+      socket.on("error", (error) => {
         if (!opened) {
           gatewayLog.failure("Gateway connection failed", error, { attempt, ms: elapsed() });
           reject(error);
@@ -682,21 +773,18 @@ export class Slack {
         }
       });
       socket.once("close", (code, reason) => {
-        clearInterval(this.ping);
+        // A socket that was already replaced must not start a second reconnect loop.
+        const current = this.socket === socket;
+        if (current) clearInterval(this.ping);
         gatewayLog.warn("Gateway socket closed", {
           attempt,
           code,
           reason: reason.toString() || undefined,
           events: this.events,
           uptimeMs: elapsed(),
-          reconnecting: !this.stopped,
+          reconnecting: !this.stopped && current,
         });
-        if (!this.stopped) {
-          this.reconnect = setTimeout(() => {
-            gatewayLog.info("Reconnecting to the Slack gateway", { attempt: this.connections + 1 });
-            this.connect().catch((error) => gatewayLog.failure("Slack reconnect failed", error, { attempt: this.connections }));
-          }, 2_000);
-        }
+        if (!this.stopped && current) this.scheduleReconnect();
       });
     });
   }

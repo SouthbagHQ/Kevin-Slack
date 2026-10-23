@@ -21,7 +21,14 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Kevin can run the music in Slack huddles through [HuddleFM](https://github.com/ingoau/huddlefm/blob/main/docs/bot-api.md). See [HuddleFM](#huddlefm).
 - Kevin can join Slack huddles, listen, talk, and mute people. See [Huddles](#huddles).
 - Kevin can have a channel of His own that He posts in at random and watches closely. See [Kevin's channel](#kevins-channel).
+- Kevin's memory lives in `MEMORY_FILE` (default `./data/memory.json`). See [Memory](#memory).
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
+
+## Memory
+
+- The file is read once at startup and kept in memory; every save, edit, and delete is written atomically before it takes effect, and pending writes finish before shutdown. A file that is not valid JSON is moved aside to `memory.json.corrupt-<time>` and Kevin starts with an empty memory instead of failing every reply.
+- Each prompt carries every record while they fit in `MEMORY_PROMPT_CHARS` (default 24,000 characters). Past that, it carries the records that mention the Slack IDs in the conversation or share its rarer words, then the most recent, and tells Kevin how many were left out. `search_memory` finds the rest by words, names, or Slack IDs.
+- `save_memory` skips a record identical to an existing one (ignoring case and punctuation) and, when existing records look like the same subject, saves but names them so Kevin can merge them with `edit_memory`. Empty records and records over 1,000 characters are refused.
 
 ## HuddleFM
 
@@ -73,6 +80,13 @@ Every component logs through `src/logger.ts`: one line per event with a timestam
 - `LOG_FORMAT=json` emits one JSON object per line for log shippers; `text` (default) is the human-readable form above.
 - Slack tokens, cookies, and API keys are redacted by field name and by value shape, long values are truncated (`LOG_MAX_FIELD`, default 500 characters), and message text is logged only as a short preview. Prompts, tool payloads, and image bytes are never logged — only their size and shape.
 - Failures log the error type, code, cause, and stack.
+
+## Reliability
+
+- Slack Web API calls time out after 20 seconds and retry at most three times, so a failing call ends a turn quickly instead of stalling a queue slot.
+- The gateway reconnects with exponential backoff (2 seconds up to a minute, with jitter), fetches a fresh gateway URL after three failed reconnects in a row, and drops a socket that has been silent for 100 seconds (Slack answers every 30-second ping).
+- A chat provider that times out is not retried; the fallback answers. After two failed requests in a row, Hack Club AI is skipped for a minute and OpenRouter answers directly. Short `Retry-After` hints are honored.
+- Channel info is cached for a minute and user info for five minutes (Kevin's own topic, description, membership, and kick changes clear the channel's entry); failed lookups are never cached. Consecutive read-only tool calls in a round run concurrently.
 
 ## Run
 
