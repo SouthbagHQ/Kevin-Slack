@@ -105,10 +105,10 @@ describe("KevinAgent in His own channel", () => {
     expect(offered).toEqual(expect.arrayContaining(["get_channel_history", "save_memory", "send_dm", "add_reaction", "pin_message", "respond", "stay_silent"]));
   });
 
-  it("shows departures with who and when, and can answer one in its thread", async () => {
-    const { agent, chat } = own(toolTurn(call("respond", { text: "Noted.", thread_ts: "7.0" })));
+  it("shows departures with who and when", async () => {
+    const { agent, chat } = own(toolTurn(call("respond", { text: "Noted." })));
     const turn = await agent.observe([{ kind: "channel_leave", user: "UBOB", ts: "7.0", at: Date.now() }]);
-    expect(turn).toMatchObject({ action: "respond", text: "Noted.", threadTs: "7.0" });
+    expect(turn).toMatchObject({ action: "respond", text: "Noted." });
     const prompt = (chat.mock.calls[0]![0].messages[1] as { content: string }).content;
     expect(prompt).toContain('"what":"left the channel"');
     expect(prompt).toContain('"messageTs":"7.0"');

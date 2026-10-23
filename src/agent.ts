@@ -296,7 +296,7 @@ const terminalTools = [{
         text: { type: "string", description: "Kevin's reply in Slack mrkdwn, under 500 characters. Omit for a reaction-only response." },
         reactions: { type: "array", maxItems: MAX_RESPOND_REACTIONS, items: { type: "string" }, description: "Emoji names to react to the current message with, such as eyes or moneybag" },
         in_thread: { type: "boolean", description: "Omit to reply where the conversation is. true starts or continues a thread under the current message; false answers in the main channel." },
-        thread_ts: { type: "string", description: "Reply inside the thread of a different message in the same conversation, by its exact ts from context; reactions then land on that message. Use it for Kevin's own posts and channel events, where there is no current message, or to answer an older message. Never guess." },
+        thread_ts: { type: "string", description: "Reply inside the thread of another message in the same conversation, by its exact ts from context; reactions then land on that message. Never guess." },
         broadcast: { type: "boolean", description: "For a thread reply, also show it in the channel. Use rarely." },
       },
     },
@@ -791,7 +791,7 @@ export class KevinAgent {
       { role: "system", content: `${this.systemPrompt(memory, angle, scope)}\n\n${KEVIN_CHANNEL_PROMPT}` },
       {
         role: "user",
-        content: `Nobody has said anything to Kevin. It is ${this.localTime()}, and He may post something of His own in His channel. Everything Kevin can do when answering a message works here: look things up, save or edit memories, DM people, post elsewhere, react, pin, set His status, join a huddle, and so on, before finishing. Finish with respond to post: a new top-level message by default, or a reply in the thread of a message from the channel with thread_ts (its reactions then land on that message). Or stay_silent if He has nothing worth saying or posted recently. Draw on His memory records and what has happened in the channel; do not repeat or closely echo His earlier posts.\n\nOne direction He could take, if it suits Him:\n${angle}\n\nKevin's channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent messages in it (newest first; author and authorId are included; Kevin's own posts are authored by ${this.kevinId}):\n${JSON.stringify(channelHistory)}${huddle}`,
+        content: `Nobody has said anything to Kevin. It is ${this.localTime()}, and He may post something of His own in His channel. Everything Kevin can do when answering a message works here: look things up, save or edit memories, DM people, post elsewhere, react, pin, set His status, join a huddle, and so on, before finishing. Finish with respond to post, or stay_silent if He has nothing worth saying or posted recently. Draw on His memory records and what has happened in the channel; do not repeat or closely echo His earlier posts.\n\nOne direction He could take, if it suits Him:\n${angle}\n\nKevin's channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent messages in it (newest first; author and authorId are included; Kevin's own posts are authored by ${this.kevinId}):\n${JSON.stringify(channelHistory)}${huddle}`,
       },
     ];
     return this.generate(messages, scope, elapsed, { origin: { channel: own.channel }, phase: "muse" });
@@ -824,7 +824,7 @@ export class KevinAgent {
       { role: "system", content: `${this.systemPrompt(memory, events.map(({ kind }) => kind).join(" "), scope)}\n\n${KEVIN_CHANNEL_PROMPT}` },
       {
         role: "user",
-        content: `Things just happened in Kevin's channel, and He noticed. Nobody addressed Him. Decide whether any of it deserves His attention. Everything Kevin can do when answering a message works here: look people up, save or edit memories, DM them, react, pin, remove someone from the channel, and so on. Finish with respond to post a top-level message, or reply in the thread of an event's message by passing its messageTs as thread_ts (respond's reactions then land on that message); or stay_silent. He does not need to remark on everything.\n\nWhat happened (oldest first${omitted ? `; ${omitted} earlier events omitted` : ""}):\n${JSON.stringify(happened)}\n\nKevin's channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent messages in it (newest first; author and authorId are included):\n${JSON.stringify(channelHistory)}${huddle}`,
+        content: `Things just happened in Kevin's channel, and He noticed. Nobody addressed Him. Decide whether any of it deserves His attention. Everything Kevin can do when answering a message works here: look people up, save or edit memories, DM them, react, pin, remove someone from the channel, and so on. Finish with respond to post, or stay_silent. He does not need to remark on everything.\n\nWhat happened (oldest first${omitted ? `; ${omitted} earlier events omitted` : ""}):\n${JSON.stringify(happened)}\n\nKevin's channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent messages in it (newest first; author and authorId are included):\n${JSON.stringify(channelHistory)}${huddle}`,
       },
     ];
     return this.generate(messages, scope, elapsed, { origin: { channel: own.channel }, phase: "observe" });
