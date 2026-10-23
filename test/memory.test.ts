@@ -24,4 +24,13 @@ describe("MemoryStore", () => {
     expect(await store.list()).toMatchObject([{ id: original.id, content: "Kevin owns two chairs." }]);
     await expect(store.edit("missing", "No.")).rejects.toThrow("Memory missing not found");
   });
+
+  it("deletes a memory by ID", async () => {
+    const store = new MemoryStore(join(await mkdtemp(join(tmpdir(), "kevin-")), "memory.json"));
+    const keep = await store.save("Kevin owns the chair.");
+    const drop = await store.save("Kevin likes sharks.");
+    expect(await store.delete(drop.id)).toMatchObject({ ok: true, deleted: { id: drop.id } });
+    expect(await store.list()).toMatchObject([{ id: keep.id }]);
+    await expect(store.delete(drop.id)).rejects.toThrow("not found");
+  });
 });

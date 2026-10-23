@@ -47,6 +47,10 @@ Kevin joins huddles as Himself, using the same user session, and connects to the
 
 Speech goes through OpenRouter's audio endpoints with `OPENROUTER_KEY` (Hack Club AI has none). Override with `HUDDLE_STT_MODEL`, `HUDDLE_TTS_MODEL`, `HUDDLE_TTS_VOICE`, `HUDDLE_TTS_SAMPLE_RATE` (sample rate of the model's raw 16-bit mono PCM, default 24000; WAV responses carry their own), and `HUDDLE_LANGUAGE` (ISO-639-1, auto-detected when unset). `CHIME_MEDIA_REGION` (default `ap-southeast-2`) picks where Slack starts a huddle Kevin begins. `HUDDLES=off` turns all of it off.
 
+## Managers
+
+Set `KEVIN_MANAGERS` to a comma-separated list of Slack user IDs. A DM to Kevin from one of them that starts with `!` is a manager command, e.g. `!update the memory about Bob: he moved to Melbourne` or `!forget the shark thing`. Kevin carries it out instead of reacting to it: no refusing, stalling, fees, or bits; memory is saved, edited, rewritten, or deleted exactly as asked; and He confirms plainly what changed. Manager commands also get a `delete_memory` tool nobody else has. Fees, sign-offs, and lore are off for that turn. Tool permissions Slack enforces (channel managers, kicking, topics) are unchanged. `!` messages from anyone else, or outside a DM, are ordinary messages.
+
 ## Kevin's channel
 
 Set `KEVIN_CHANNEL` to a channel ID to give Kevin a channel of His own. He joins it at startup if it is public; invite Him if it is private.

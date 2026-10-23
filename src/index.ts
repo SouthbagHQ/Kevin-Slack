@@ -12,7 +12,7 @@ import { SpeechClient } from "./huddle/speech.js";
 import { OPENROUTER_BASE } from "./chat.js";
 import { createLogger, getLogLevel, preview, setLogFormat, setLogLevel, timer } from "./logger.js";
 import { MemoryStore } from "./memory.js";
-import { isBotMessage, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
+import { isBotMessage, isEphemeralMessage, isIgnoredMessage, isManagerCommand, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
 import { messageRef, Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
 
@@ -122,7 +122,8 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   const exchangeKey = botExchangeKey(message);
   const threadKey = `${message.channel}:${message.thread_ts ?? message.ts}`;
   const own = message.channel === config.kevinChannel;
-  const trigger = pinged ? "ping" : dm ? "dm" : own ? "own-channel" : "auto";
+  const manager = values.some((item) => isManagerCommand(item.message, config.kevinManagers));
+  const trigger = manager ? "manager" : pinged ? "ping" : dm ? "dm" : own ? "own-channel" : "auto";
   const scope = reply.with({ ...messageRef(message), trigger });
   scope.info("Handling conversation", { messages: values.length, omitted, combined, fromBot, conversation: exchangeKey });
 
@@ -146,7 +147,7 @@ const queue = new ConversationQueue<Incoming>(async ({ values, omitted }) => {
   const stopTyping = slack.startTyping(message.channel, message.thread_ts);
   let turn: Turn | undefined;
   try {
-    turn = await kevin.respond(message);
+    turn = await kevin.respond(message, { manager });
     if (turn.action === "silent") {
       scope.info("Stayed silent", { reason: preview(turn.reason, 200), ms: elapsed() });
       return;

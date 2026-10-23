@@ -34,6 +34,9 @@ export const isEphemeralMessage = ({ is_ephemeral }: { is_ephemeral?: boolean })
 export const isRespondableMessage = ({ subtype }: { subtype?: string }) => !subtype || RESPONDABLE_SUBTYPES.has(subtype);
 export const isMentioned = (text: string, userId: string) => new RegExp(mention(userId)).test(text);
 export const isStopCommand = (text: string, userId: string) => new RegExp(`${mention(userId)}\\s*!stop(?:\\s|$)`, "i").test(text);
+/** A "!" DM from one of Kevin's managers: an instruction to carry out, not conversation. */
+export const isManagerCommand = (message: { channel: string; user?: string; bot_id?: string; subtype?: string; text?: string }, managers: ReadonlySet<string>) =>
+  message.channel.startsWith("D") && !isBotMessage(message) && Boolean(message.user && managers.has(message.user)) && (message.text ?? "").trimStart().startsWith("!");
 export const shouldConsiderMessage = ({ pinged, dm, autoMode }: { pinged: boolean; dm: boolean; autoMode: boolean }) => pinged || dm || autoMode;
 export const shouldClassifyRelevance = ({ pinged, dm, autoMode }: { pinged: boolean; dm: boolean; autoMode: boolean }) => !pinged && !dm && autoMode;
 

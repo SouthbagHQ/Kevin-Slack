@@ -52,6 +52,19 @@ export class MemoryStore {
     });
   }
 
+  async delete(id: string) {
+    return this.write((memories) => {
+      const index = memories.findIndex((item) => item.id === id);
+      if (index < 0) {
+        log.warn("Memory delete rejected; unknown ID", { id, total: memories.length });
+        throw new Error(`Memory ${id} not found`);
+      }
+      const [removed] = memories.splice(index, 1);
+      log.info("Deleted memory", { id, total: memories.length, content: preview(removed!.content, 160) });
+      return { ok: true, deleted: removed };
+    });
+  }
+
   private write<T>(change: (memories: Memory[]) => T) {
     const write = this.writes.then(async () => {
       const elapsed = timer();

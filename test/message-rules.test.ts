@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeMessageType, isBotMessage, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "../src/message-rules.js";
+import { describeMessageType, isBotMessage, isManagerCommand, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "../src/message-rules.js";
 
 describe("message rules", () => {
   it("ignores messages beginning with ##", () => {
@@ -69,5 +69,16 @@ describe("message rules", () => {
     expect(shouldClassifyRelevance({ pinged: true, dm: false, autoMode: false })).toBe(false);
     expect(shouldConsiderMessage({ pinged: false, dm: true, autoMode: false })).toBe(true);
     expect(shouldClassifyRelevance({ pinged: false, dm: true, autoMode: false })).toBe(false);
+  });
+});
+
+describe("isManagerCommand", () => {
+  const managers = new Set(["UBOSS"]);
+  it("needs a managers' DM that starts with !", () => {
+    expect(isManagerCommand({ channel: "D1", user: "UBOSS", text: " !update the memory" }, managers)).toBe(true);
+    expect(isManagerCommand({ channel: "D1", user: "UBOSS", text: "update the memory" }, managers)).toBe(false);
+    expect(isManagerCommand({ channel: "D1", user: "UOTHER", text: "!update the memory" }, managers)).toBe(false);
+    expect(isManagerCommand({ channel: "C1", user: "UBOSS", text: "!update the memory" }, managers)).toBe(false);
+    expect(isManagerCommand({ channel: "D1", user: "UBOSS", bot_id: "B1", text: "!update" }, managers)).toBe(false);
   });
 });

@@ -114,3 +114,27 @@ describe("KevinAgent in His own channel", () => {
     expect(prompt).toContain('"messageTs":"7.0"');
   });
 });
+
+describe("KevinAgent manager commands", () => {
+  it("offers delete_memory and the manager instructions only on a manager command", async () => {
+    const { agent, chat } = setup(toolTurn(call("delete_memory", { id: "m1" })), toolTurn(call("respond", { text: "Deleted." })));
+    const memory = { list: async () => [{ id: "m1", content: "Kevin likes sharks." }], delete: vi.fn(async (id: string) => ({ ok: true, deleted: { id } })) };
+    Object.assign(agent, { memory });
+    expect(await agent.respond({ channel: "D1", ts: "1.0", user: "UBOSS", text: "!forget the shark thing" }, { manager: true })).toMatchObject({ action: "respond", text: "Deleted." });
+    expect(memory.delete).toHaveBeenCalledWith("m1");
+    const request = chat.mock.calls[0]![0];
+    expect(request.tools!.map(({ function: { name } }) => name)).toContain("delete_memory");
+    expect((request.messages[0] as { content: string }).content).toContain("# Manager command");
+    expect((request.messages[0] as { content: string }).content).toContain("New fee: forbidden");
+  });
+
+  it("refuses delete_memory outside a manager command", async () => {
+    const { agent, chat, sent } = setup(toolTurn(call("delete_memory", { id: "m1" })), toolTurn(call("stay_silent", {})));
+    const memory = { list: async () => [], delete: vi.fn() };
+    Object.assign(agent, { memory });
+    await agent.respond(message);
+    expect(memory.delete).not.toHaveBeenCalled();
+    expect(chat.mock.calls[0]![0].tools!.map(({ function: { name } }) => name)).not.toContain("delete_memory");
+    expect((sent[0]![0] as { content: string }).content).not.toContain("# Manager command");
+  });
+});
