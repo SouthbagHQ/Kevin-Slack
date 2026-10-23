@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MAX_MEMORY_CHARS, MemoryStore, promptMemory, rankMemories, selectMemories, type Memory } from "../src/memory.js";
+import { MAX_MEMORY_CHARS, MemoryStore, promptMemory, rankMemories, type Memory } from "../src/memory.js";
 
 describe("MemoryStore", () => {
   it("persists memories with private permissions", async () => {
@@ -83,35 +83,15 @@ describe("MemoryStore reliability", () => {
     await expect(store.save("Lost.")).rejects.toThrow();
     expect((await store.list()).map(({ content }) => content)).toEqual(["Kept."]);
   });
-
-  it("searches by words and Slack IDs", async () => {
-    const store = new MemoryStore(await fresh());
-    await store.save("Slack user U123ABC (Bob) owes Kevin a report.");
-    await store.save("The Briefcase is occupied.");
-    expect(await store.search("U123ABC")).toMatchObject([{ content: "Slack user U123ABC (Bob) owes Kevin a report." }]);
-    expect(await store.search("briefcase")).toMatchObject([{ content: "The Briefcase is occupied." }]);
-    expect(await store.search("nothing matches this")).toEqual([]);
-  });
 });
 
-describe("selectMemories", () => {
+describe("rankMemories", () => {
   const memory = (id: string, content: string, day: number): Memory => ({ id, content, createdAt: `2026-01-${String(day).padStart(2, "0")}T00:00:00.000Z` });
   const all = [
     memory("a", "Slack user UBOBBOB1 (Bob) hates parking fees.", 1),
     memory("b", "The fourth floor printer is cursed.", 2),
     memory("c", "Slack user UALICE01 (Alice) runs finance.", 3),
-    memory("d", "Kevin's chair is non-negotiable.", 4),
   ];
-
-  it("shows everything that fits", () => {
-    expect(selectMemories(all, { text: "hi" }, 10_000)).toEqual({ memories: all, omitted: 0 });
-  });
-
-  it("keeps relevant records first when over budget, then the most recent, in store order", () => {
-    const { memories, omitted } = selectMemories(all, { text: "what about the printer?", ids: ["UBOBBOB1"] }, 300);
-    expect(memories.map(({ id }) => id)).toEqual(["a", "b", "d"]);
-    expect(omitted).toBe(1);
-  });
 
   it("ranks an exact Slack ID above a shared word", () => {
     expect(rankMemories(all, { text: "finance", ids: ["UBOBBOB1"] })[0]!.memory.id).toBe("a");

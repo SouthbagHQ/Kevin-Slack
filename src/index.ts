@@ -11,7 +11,9 @@ import { Huddles } from "./huddle/huddles.js";
 import { SpeechClient } from "./huddle/speech.js";
 import { OPENROUTER_BASE } from "./chat.js";
 import { createLogger, getLogLevel, preview, setLogFormat, setLogLevel, timer } from "./logger.js";
+import { EmbeddingClient } from "./embeddings.js";
 import { MemoryStore } from "./memory.js";
+import { MemoryRecall } from "./memory-recall.js";
 import { isBotMessage, isEphemeralMessage, isIgnoredMessage, isManagerCommand, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
 import { messageRef, Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
@@ -76,7 +78,21 @@ const ownSchedule = ownChannel ? parseCron(config.kevinChannelCron, ownChannel.t
 const memory = new MemoryStore(config.memoryFile);
 // Read once at startup so a missing volume or a broken file shows up now, not on the first reply.
 log.info("Memory ready", { file: config.memoryFile, records: (await memory.list()).length });
-const kevin = new KevinAgent(slack, memory, channelModes, userId, huddleFm, huddles, ownChannel);
+const recall = new MemoryRecall(
+  memory,
+  config.memoryEmbeddingModel
+    ? new EmbeddingClient(config.openRouterKey, {
+      baseUrl: OPENROUTER_BASE,
+      model: config.memoryEmbeddingModel,
+      extraHeaders: { "X-OpenRouter-Title": "Kevin Slack" },
+      extraBody: { provider: { data_collection: "deny" } },
+    })
+    : undefined,
+  { limit: config.memoryPromptLimit, budgetChars: config.memoryPromptChars, minSimilarity: config.memoryMinSimilarity },
+);
+// Embeds every record in the background so the first reply does not wait for it.
+void recall.prepare().catch((error) => log.failure("Preparing memory recall failed", error));
+const kevin = new KevinAgent(slack, memory, channelModes, userId, huddleFm, huddles, ownChannel, recall);
 if (huddles) {
   huddles.onVoiceTurn = (input) => kevin.voiceTurn(input);
   slack.onEvent((event) => huddles.handleEvent(event));

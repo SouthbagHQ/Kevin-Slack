@@ -26,9 +26,12 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 
 ## Memory
 
-- The file is read once at startup and kept in memory; every save, edit, and delete is written atomically before it takes effect, and pending writes finish before shutdown. A file that is not valid JSON is moved aside to `memory.json.corrupt-<time>` and Kevin starts with an empty memory instead of failing every reply.
-- Each prompt carries every record while they fit in `MEMORY_PROMPT_CHARS` (default 24,000 characters). Past that, it carries the records that mention the Slack IDs in the conversation or share its rarer words, then the most recent, and tells Kevin how many were left out. `search_memory` finds the rest by words, names, or Slack IDs.
-- `save_memory` skips a record identical to an existing one (ignoring case and punctuation) and, when existing records look like the same subject, saves but names them so Kevin can merge them with `edit_memory`. Empty records and records over 1,000 characters are refused.
+Kevin remembers everything worth remembering, but each prompt only reminds Him of what bears on the conversation at hand.
+
+- *Recall:* a record is shown when it names a Slack user or channel in play (the sender, recent authors, huddle participants, the channel), when its meaning is close to the current message or the conversation around it, or when it shares distinctive words with them. Up to `MEMORY_PROMPT_LIMIT` records (default 25) and `MEMORY_PROMPT_CHARS` characters (default 8,000) are shown, most relevant first. Kevin is told how many records He has in all, and `search_memory` searches every one of them by meaning, words, names, or Slack IDs.
+- *Embeddings:* meaning comes from `MEMORY_EMBEDDING_MODEL` (default `openai/text-embedding-3-small`, through OpenRouter with `OPENROUTER_KEY`). Each record is embedded once in the background at startup and again only when its text changes; vectors live in memory, not on disk. A record counts as close in meaning at cosine similarity `MEMORY_MIN_SIMILARITY` (default 0.35; lower shows more, higher shows less). When embeddings fail, recall falls back to IDs and keywords for a minute instead of failing the turn. `MEMORY_EMBEDDING_MODEL=off` uses IDs and keywords only.
+- *Saving:* a save identical to an existing record (ignoring case and punctuation) is skipped; a save that overlaps existing records goes through and names them so Kevin can merge them with `edit_memory`. Empty records and records over 1,000 characters are refused.
+- *Storage:* `MEMORY_FILE` (default `./data/memory.json`) is read once at startup and kept in memory. Every change is written atomically before it takes effect, and pending writes finish before shutdown. A file that is not valid JSON is moved aside to `memory.json.corrupt-<time>`, and Kevin starts with an empty memory instead of failing every reply.
 
 ## HuddleFM
 

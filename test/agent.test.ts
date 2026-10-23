@@ -161,15 +161,22 @@ describe("KevinAgent tool rounds and memory", () => {
     expect((sent[1]!.slice(-2) as { tool_call_id: string }[]).map(({ tool_call_id }) => tool_call_id)).toEqual(["a", "b"]);
   });
 
-  it("offers search_memory and says when memories were left out", async () => {
-    const { agent, chat } = setup(toolTurn(call("search_memory", { query: "sharks" })), toolTurn(call("stay_silent", {})));
-    const records = Array.from({ length: 400 }, (_, index) => ({ id: `m${index}`, content: `Filler memory number ${index} about nothing in particular at all.`, createdAt: "2026-01-01T00:00:00.000Z" }));
-    const memory = { list: async () => records, search: vi.fn(async () => [{ id: "m1", content: "Kevin likes sharks." }]) };
-    Object.assign(agent, { memory });
-    await agent.respond(message);
+  it("shows only related memories and finds the rest with search_memory", async () => {
+    const { agent, chat, sent } = setup(toolTurn(call("search_memory", { query: "sharks" })), toolTurn(call("stay_silent", {})));
+    const records = [
+      { id: "fee", content: "Slack user UBOBBOB1 (Bob) owes a waiver fee.", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "sharks", content: "Kevin likes sharks.", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "chair", content: "The chair is non-negotiable.", createdAt: "2026-01-01T00:00:00.000Z" },
+    ];
+    Object.assign(agent, { memory: { list: async () => records } });
+    await agent.respond({ ...message, user: "UBOBBOB1" });
     const request = chat.mock.calls[0]![0];
     expect(request.tools!.map(({ function: { name } }) => name)).toContain("search_memory");
-    expect((request.messages[0] as { content: string }).content).toMatch(/older records are not shown/);
-    expect(memory.search).toHaveBeenCalledWith("sharks", undefined);
+    const system = (request.messages[0] as { content: string }).content;
+    expect(system).toContain("Kevin remembers 3 records in all");
+    expect(system).toContain('"id":"fee"');
+    expect(system).not.toContain('"id":"sharks"');
+    const result = sent[1]!.at(-1) as { role: string; content: string };
+    expect(JSON.parse(result.content)).toMatchObject([{ id: "sharks" }]);
   });
 });

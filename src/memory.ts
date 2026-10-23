@@ -7,8 +7,11 @@ export type Memory = { id: string; content: string; createdAt: string; updatedAt
 /** What save_memory hands back: the record, plus a nudge when it duplicates or overlaps others. */
 export type SavedMemory = Memory & { duplicate?: true; similar?: ReturnType<typeof promptMemory>[]; note?: string };
 
-/** What a conversation is about, for picking the memories worth showing: its words and the Slack IDs in it. */
-export type MemoryFocus = { text?: string; ids?: Iterable<string | undefined> };
+/**
+ * What a conversation is about, for picking the memories worth showing: the
+ * message at hand, its surrounding text, and the Slack IDs in play.
+ */
+export type MemoryFocus = { primary?: string; text?: string; ids?: Iterable<string | undefined> };
 
 export const MAX_MEMORY_CHARS = 1_000;
 
@@ -32,14 +35,16 @@ const similarity = (a: Set<string>, b: Set<string>) => {
 };
 
 /**
- * Scores every memory against a focus: a Slack ID the conversation mentions
- * counts most, then shared words (rarer words count more), with a small nudge
- * toward recently touched records. Highest first; ties keep store order.
+ * Scores every memory against a focus by keywords: a Slack ID the
+ * conversation mentions counts most (`idHits`), then shared words, rarer
+ * words counting more (`lexical`). Highest first; ties go to recently touched
+ * records, then store order.
  */
 export const rankMemories = (memories: Memory[], focus: MemoryFocus) => {
+  const text = [focus.primary, focus.text].filter(Boolean).join("\n");
   const ids = new Set([...(focus.ids ?? [])].filter((id): id is string => Boolean(id)));
-  for (const id of slackIds(focus.text ?? "")) ids.add(id);
-  const query = terms(focus.text ?? "");
+  for (const id of slackIds(text)) ids.add(id);
+  const query = terms(text);
   const indexed = memories.map((memory) => ({ memory, terms: terms(memory.content), ids: slackIds(memory.content) }));
   const frequency = new Map<string, number>();
   for (const { terms: words } of indexed) for (const word of words) if (query.has(word)) frequency.set(word, (frequency.get(word) ?? 0) + 1);
@@ -47,39 +52,17 @@ export const rankMemories = (memories: Memory[], focus: MemoryFocus) => {
   const recency = new Map(byAge.map((memory, index) => [memory.id, memories.length > 1 ? index / (memories.length - 1) : 1]));
   return indexed
     .map(({ memory, terms: words, ids: mentioned }, index) => {
-      let score = 0;
-      for (const id of mentioned) if (ids.has(id)) score += 4;
-      for (const word of words) if (query.has(word)) score += Math.log(1 + memories.length / frequency.get(word)!);
-      return { memory, score, recency: recency.get(memory.id) ?? 0, index };
+      let idHits = 0;
+      let lexical = 0;
+      for (const id of mentioned) if (ids.has(id)) idHits++;
+      for (const word of words) if (query.has(word)) lexical += Math.log(1 + memories.length / frequency.get(word)!);
+      return { memory, score: idHits * 4 + lexical, idHits, lexical, recency: recency.get(memory.id) ?? 0, index };
     })
     .sort((a, b) => b.score - a.score || b.recency - a.recency || a.index - b.index);
 };
 
 /** The shape memories take in a prompt: no timestamps beyond the day it was last touched. */
 export const promptMemory = (memory: Memory) => ({ id: memory.id, content: memory.content, ...(touched(memory) ? { date: touched(memory).slice(0, 10) } : {}) });
-
-/**
- * The memories that fit in a prompt. Under the budget, all of them; over it,
- * the ones that bear on the focus first, then the most recent, in store order.
- */
-export const selectMemories = (memories: Memory[], focus: MemoryFocus, budgetChars: number) => {
-  const size = (memory: Memory) => memory.content.length + memory.id.length + 40;
-  const total = memories.reduce((sum, memory) => sum + size(memory), 0);
-  if (total <= budgetChars) return { memories, omitted: 0 };
-  const ranked = rankMemories(memories, focus);
-  const chosen = new Set<string>();
-  let used = 0;
-  const take = (memory: Memory) => {
-    if (chosen.has(memory.id) || used + size(memory) > budgetChars) return;
-    chosen.add(memory.id);
-    used += size(memory);
-  };
-  // Relevant records get at most two thirds of the room so recent context always has some.
-  for (const { memory, score } of ranked) if (score > 0 && used + size(memory) <= budgetChars * 0.66) take(memory);
-  for (const memory of [...memories].sort((a, b) => touched(b).localeCompare(touched(a)))) take(memory);
-  const selected = memories.filter((memory) => chosen.has(memory.id));
-  return { memories: selected, omitted: memories.length - selected.length };
-};
 
 const validContent = (content: unknown) => {
   if (typeof content !== "string" || !content.trim()) throw new Error("Memory content must be a non-empty string");
@@ -102,15 +85,6 @@ export class MemoryStore {
 
   async list() {
     return [...(await this.load())];
-  }
-
-  /** The memories most related to a query, for the search tool. */
-  async search(query: string, limit = 10) {
-    const memories = await this.load();
-    return rankMemories(memories, { text: query })
-      .filter(({ score }) => score > 0)
-      .slice(0, Math.max(1, Math.min(limit, 25)))
-      .map(({ memory }) => promptMemory(memory));
   }
 
   /** Resolves once every queued write has reached the disk. */
