@@ -14,6 +14,7 @@ export type RecallOptions = {
 };
 
 export type Recalled = { memories: Memory[]; total: number; mode: "semantic" | "keyword" };
+type Weighted = { vector: Float32Array; weight: number };
 
 const DEFAULTS: RecallOptions = { limit: 25, budgetChars: 8_000, minSimilarity: 0.35 };
 const EMBED_BATCH = 96;
@@ -37,6 +38,7 @@ export class MemoryRecall {
   private vectors = new Map<string, { content: string; vector: Float32Array }>();
   private syncing: Promise<unknown> = Promise.resolve();
   private pausedUntil = 0;
+  private focusVectors = new WeakMap<MemoryFocus, Weighted[]>();
   private options: RecallOptions;
 
   constructor(private store: Pick<MemoryStore, "list">, private embedder?: Embedder, options: Partial<RecallOptions> = {}) {
@@ -80,17 +82,36 @@ export class MemoryRecall {
     return memories;
   }
 
-  /** The focus as vectors: the message at hand, and the conversation around it. */
-  private async queryVectors(focus: MemoryFocus) {
+  /**
+   * The focus as weighted vectors: the message at hand counts fully, the
+   * conversation around it a little less, and the setting (channel, people)
+   * less again, so a channel's topic colours recall without drowning the
+   * message. Kept per focus, so a search later in the turn reuses them.
+   */
+  private async queryVectors(focus: MemoryFocus): Promise<Weighted[]> {
     if (!this.embedding) return [];
-    const inputs = [focus.primary, focus.text].map((text) => text?.trim().slice(0, QUERY_CHARS)).filter((text): text is string => Boolean(text));
-    if (!inputs.length) return [];
+    const cached = this.focusVectors.get(focus);
+    if (cached) return cached;
+    const weighted = new Map<string, number>();
+    for (const [text, weight] of [[focus.primary, 1], [focus.text, 0.9], [focus.setting, 0.8]] as const) {
+      const input = text?.trim().slice(0, QUERY_CHARS);
+      if (input && !weighted.has(input)) weighted.set(input, weight);
+    }
+    if (!weighted.size) return [];
     try {
-      return await this.embedder!.embed([...new Set(inputs)], QUERY_TIMEOUT_MS);
+      const vectors = await this.embedder!.embed([...weighted.keys()], QUERY_TIMEOUT_MS);
+      const result = [...weighted.values()].map((weight, index) => ({ vector: vectors[index]!, weight }));
+      this.focusVectors.set(focus, result);
+      return result;
     } catch (error) {
       this.pause(error, "Embedding the conversation");
       return [];
     }
+  }
+
+  private similarity(queries: Weighted[], id: string) {
+    const vector = this.vectors.get(id)?.vector;
+    return vector && queries.length ? Math.max(...queries.map((query) => cosine(query.vector, vector) * query.weight)) : 0;
   }
 
   /** Every record scored against a focus, most relevant first, with whether it clears the bar. */
@@ -98,14 +119,12 @@ export class MemoryRecall {
     const [memories, queries] = await Promise.all([this.prepare(), this.queryVectors(focus)]);
     const semantic = queries.length > 0;
     const scored = rankMemories(memories, focus).map(({ memory, idHits, lexical }) => {
-      const vector = this.vectors.get(memory.id);
-      // The message itself counts fully; the wider conversation a little less.
-      const similarity = semantic && vector ? Math.max(...queries.map((query, index) => cosine(query, vector.vector) * (index === 0 ? 1 : 0.9))) : 0;
+      const similarity = this.similarity(queries, memory.id);
       const relevant = idHits > 0 || (semantic ? similarity >= minSimilarity || lexical >= minLexical * 2 : lexical >= minLexical);
-      return { memory, similarity, relevant, rank: similarity + 0.2 * Math.min(idHits, 2) + 0.03 * Math.min(lexical, 10) };
+      return { memory, similarity, idHits, lexical, relevant, rank: similarity + 0.2 * Math.min(idHits, 2) + 0.03 * Math.min(lexical, 10) };
     });
     scored.sort((a, b) => b.rank - a.rank);
-    return { scored, total: memories.length, mode: semantic ? "semantic" as const : "keyword" as const };
+    return { scored, total: memories.length, mode: semantic ? "semantic" as const : "keyword" as const, queries };
   }
 
   /** The records worth reminding Kevin of in this conversation, most relevant first. */
@@ -130,13 +149,22 @@ export class MemoryRecall {
     return { memories, total, mode };
   }
 
-  /** The search tool: a looser bar than the prompt, since Kevin asked. */
-  async search(query: string, limit = 10) {
+  /**
+   * The search tool: a looser bar than the prompt, since Kevin asked. Only
+   * the query decides what matches; the conversation it was asked in (when
+   * given) breaks ties, so "the fee" finds the fee owed by whoever is talking.
+   */
+  async search(query: string, limit = 10, context?: MemoryFocus) {
     // Any shared word counts here.
     const { scored } = await this.score({ primary: query }, this.options.minSimilarity - 0.1, Number.MIN_VALUE);
-    return scored
-      .filter(({ relevant }) => relevant)
-      .slice(0, Math.max(1, Math.min(Number(limit) || 10, 25)))
-      .map(({ memory }) => promptMemory(memory));
+    const matches = scored.filter(({ relevant }) => relevant);
+    if (context && matches.length > 1) {
+      const [queries, memories] = await Promise.all([this.queryVectors(context), this.store.list()]);
+      const around = new Map(rankMemories(memories, context).map((item) => [item.memory.id, item]));
+      const bonus = (id: string) => 0.15 * this.similarity(queries, id) + (around.get(id)?.idHits ? 0.1 : 0) + 0.01 * Math.min(around.get(id)?.lexical ?? 0, 10);
+      const ranked = new Map(matches.map((item) => [item.memory.id, item.rank + bonus(item.memory.id)]));
+      matches.sort((a, b) => ranked.get(b.memory.id)! - ranked.get(a.memory.id)!);
+    }
+    return matches.slice(0, Math.max(1, Math.min(Number(limit) || 10, 25))).map(({ memory }) => promptMemory(memory));
   }
 }

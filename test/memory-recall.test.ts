@@ -73,4 +73,38 @@ describe("MemoryRecall", () => {
     expect((await new MemoryRecall(store(), fakeEmbedder()).search("ocean creatures")).map(({ id }) => id)).toEqual(["sharks"]);
     expect((await new MemoryRecall(store()).search("photograph")).map(({ id }) => id)).toEqual(["sharks"]);
   });
+
+  it("lets the channel and the people in it shape recall", async () => {
+    const recall = new MemoryRecall(store(), fakeEmbedder());
+    // Nothing in the message itself; the channel's name and topic carry it.
+    const { memories } = await recall.relevant({ primary: "morning all", setting: "#parking-lot\nWho took whose spot" });
+    expect(memories.map(({ id }) => id)).toEqual(["parking"]);
+  });
+
+  it("uses the setting's words without embeddings too", async () => {
+    const recall = new MemoryRecall(store());
+    const { memories } = await recall.relevant({ primary: "morning all", setting: "#quarterly-report" });
+    expect(memories.map(({ id }) => id)).toEqual(["bob"]);
+  });
+
+  it("breaks search ties with the conversation it was asked in", async () => {
+    const fees = [
+      { ...memory("alice-fee", "Slack user UALICE01 (Alice) owes a late fee."), createdAt: "2026-02-01T00:00:00.000Z" },
+      memory("bob-fee", "Slack user UBOBBOB1 (Bob) owes a late fee."),
+    ];
+    const recall = new MemoryRecall(store(fees));
+    expect((await recall.search("late fee")).map(({ id }) => id)).toEqual(["alice-fee", "bob-fee"]);
+    expect((await recall.search("late fee", 10, { ids: ["UBOBBOB1"] })).map(({ id }) => id)).toEqual(["bob-fee", "alice-fee"]);
+  });
+
+  it("embeds a turn's focus once even when it searches later", async () => {
+    const embedder = fakeEmbedder();
+    const recall = new MemoryRecall(store(), embedder);
+    const focus = { primary: "where's my seat", text: "earlier chatter", setting: "#office" };
+    await recall.relevant(focus);
+    const calls = embedder.embed.mock.calls.length;
+    await recall.search("chair", 10, focus);
+    // Only the query itself is new.
+    expect(embedder.embed.mock.calls.length).toBe(calls + 1);
+  });
 });

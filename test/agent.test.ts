@@ -179,4 +179,23 @@ describe("KevinAgent tool rounds and memory", () => {
     const result = sent[1]!.at(-1) as { role: string; content: string };
     expect(JSON.parse(result.content)).toMatchObject([{ id: "sharks" }]);
   });
+
+  it("recalls by the channel's topic and the sender's title", async () => {
+    const { agent, slack, chat } = setup(toolTurn(call("stay_silent", {})));
+    slack.channelInfo.mockImplementation(async () => ({ id: "C1", name: "office-moves", topic: "Who sits where after the refit" }) as never);
+    slack.userInfo.mockImplementation(async () => ({ id: "UBOB", title: "Facilities Manager" }) as never);
+    const records = [
+      { id: "refit", content: "The refit moved Kevin's chair to floor 3; He has not forgiven anyone.", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "facilities", content: "Facilities keeps losing Kevin's parking permit.", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "sharks", content: "Kevin likes sharks.", createdAt: "2026-01-01T00:00:00.000Z" },
+      // A realistic store, so a word shared with one record is distinctive.
+      ...Array.from({ length: 30 }, (_, index) => ({ id: `filler${index}`, content: `Unrelated note number ${index}.`, createdAt: "2026-01-01T00:00:00.000Z" })),
+    ];
+    Object.assign(agent, { memory: { list: async () => records } });
+    await agent.respond({ ...message, text: "morning" });
+    const system = (chat.mock.calls[0]![0].messages[0] as { content: string }).content;
+    expect(system).toContain('"id":"refit"');
+    expect(system).toContain('"id":"facilities"');
+    expect(system).not.toContain('"id":"sharks"');
+  });
 });

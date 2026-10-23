@@ -9,9 +9,11 @@ export type SavedMemory = Memory & { duplicate?: true; similar?: ReturnType<type
 
 /**
  * What a conversation is about, for picking the memories worth showing: the
- * message at hand, its surrounding text, and the Slack IDs in play.
+ * message at hand, the conversation around it, where it is happening and
+ * who is in it (channel name, topic, description, people's names and
+ * titles), and the Slack IDs in play.
  */
-export type MemoryFocus = { primary?: string; text?: string; ids?: Iterable<string | undefined> };
+export type MemoryFocus = { primary?: string; text?: string; setting?: string; ids?: Iterable<string | undefined> };
 
 export const MAX_MEMORY_CHARS = 1_000;
 
@@ -41,7 +43,7 @@ const similarity = (a: Set<string>, b: Set<string>) => {
  * records, then store order.
  */
 export const rankMemories = (memories: Memory[], focus: MemoryFocus) => {
-  const text = [focus.primary, focus.text].filter(Boolean).join("\n");
+  const text = [focus.primary, focus.text, focus.setting].filter(Boolean).join("\n");
   const ids = new Set([...(focus.ids ?? [])].filter((id): id is string => Boolean(id)));
   for (const id of slackIds(text)) ids.add(id);
   const query = terms(text);

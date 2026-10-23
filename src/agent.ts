@@ -37,12 +37,23 @@ type ContextMessage = { authorId?: string; text?: string };
 /** What a turn is about: the text at hand, which also sets the reply variation, plus the people and places around it for choosing memories. */
 type TurnFocus = MemoryFocus & { primary: string };
 
-/** Histories are newest first; only the latest few messages of each count toward the focus. */
-const memoryFocus = (text: string, ids: (string | undefined)[], ...histories: ContextMessage[][]): TurnFocus => ({
+/**
+ * Builds a turn's focus. Histories are newest first; only the latest few
+ * messages of each count. The setting is where the turn happens and who is
+ * in it: channel name, topic, and description, people's names and titles.
+ */
+const memoryFocus = ({ text, ids = [], setting = [], histories = [] }: { text: string; ids?: (string | undefined)[]; setting?: unknown[]; histories?: ContextMessage[][] }): TurnFocus => ({
   primary: text,
   text: histories.flatMap((history) => history.slice(0, 6).map((message) => message.text ?? "")).filter(Boolean).join("\n"),
+  setting: [...new Set(setting.filter((item): item is string => typeof item === "string" && Boolean(item.trim())))].join("\n"),
   ids: [...ids, ...histories.flat().map((message) => message.authorId)],
 });
+
+type ChannelLike = { name?: string; topic?: string; description?: string };
+type PersonLike = { displayName?: string; realName?: string; username?: string; title?: string; name?: string } | null | undefined;
+
+const channelSetting = (channel: ChannelLike) => [channel.name ? `#${channel.name}` : undefined, channel.topic, channel.description];
+const personSetting = (person: PersonLike) => [person?.displayName, person?.realName, person?.username, person?.name, person?.title];
 
 const log = createLogger("agent");
 
@@ -54,7 +65,7 @@ export type Turn = Outcome & { leaveAfter: string[] };
  * announcement goes to, or a huddle Kevin is speaking in (where leaving waits
  * until He has finished speaking).
  */
-type ToolContext = { message?: SlackMessage; origin?: Origin; huddle?: { channel: string; leave: boolean }; phase?: string; manager?: boolean };
+type ToolContext = { message?: SlackMessage; origin?: Origin; huddle?: { channel: string; leave: boolean }; phase?: string; manager?: boolean; focus?: MemoryFocus };
 
 /** Kevin's personal channel, when one is configured. */
 export type OwnChannel = { channel: string; timezone?: string; userGroup?: { id: string; handle?: string } };
@@ -735,14 +746,20 @@ export class KevinAgent {
       huddleFmSessions: music.length,
       ms: context(),
     });
+    const focus = memoryFocus({
+      text: message.text ?? "",
+      ids: [message.user, message.channel],
+      setting: [...channelSetting(channel), ...personSetting(user)],
+      histories: [[...threadHistory].reverse(), channelHistory],
+    });
     const messages: Message[] = [
-      { role: "system", content: `${await this.systemPrompt(memoryFocus(message.text ?? "", [message.user, message.channel], [...threadHistory].reverse(), channelHistory), scope, manager)}${manager ? `\n\n${MANAGER_PROMPT}` : ""}` },
+      { role: "system", content: `${await this.systemPrompt(focus, scope, manager)}${manager ? `\n\n${MANAGER_PROMPT}` : ""}` },
       {
         role: "user",
         content: `${manager ? "Carry out the manager command in the latest Slack message, then confirm what changed." : "Respond to the latest Slack message."}${message.channel === this.ownChannel?.channel ? "\n\nThis is Kevin's own channel. He sees every message here, not just the ones addressed to Him. Reply when He has something to say; otherwise stay_silent. A reaction is often enough." : ""}\n\nCurrent message:\n${JSON.stringify(this.slack.modelMessage(message))}\n\nSender profile:\n${JSON.stringify(user)}\n\nCurrent channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent channel context (newest first; author and authorId are included):\n${JSON.stringify(channelHistory)}\n\nCurrent thread context:\n${JSON.stringify(threadHistory)}${this.musicSection(music)}${huddle}`,
       },
     ];
-    return this.generate(messages, scope, elapsed, { message, manager });
+    return this.generate(messages, scope, elapsed, { message, manager, focus });
   }
 
   /** Decides whether Kevin says something aloud in a huddle, and what; the text comes back to be spoken. */
@@ -762,14 +779,20 @@ export class KevinAgent {
       latest: input.latest ?? null,
       recentSpeech: input.transcript,
     };
+    const focus = memoryFocus({
+      text: input.latest?.text ?? "",
+      ids: [input.channel, input.latest?.speakerId, input.invitedBy, ...input.participants.map((participant) => participant.id)],
+      setting: [...("visibleToKevin" in channel ? [] : channelSetting(channel)), ...input.participants.map((participant) => participant.name)],
+      histories: [[...input.transcript].reverse().map((line) => ({ authorId: line.speakerId, text: line.text }))],
+    });
     const messages: Message[] = [
-      { role: "system", content: `${await this.systemPrompt(memoryFocus(input.latest?.text ?? "", [input.channel, input.latest?.speakerId, input.invitedBy, ...input.participants.map((participant) => participant.id)], [...input.transcript].reverse().map((line) => ({ authorId: line.speakerId, text: line.text }))), scope)}\n\n${VOICE_PROMPT}` },
+      { role: "system", content: `${await this.systemPrompt(focus, scope)}\n\n${VOICE_PROMPT}` },
       {
         role: "user",
         content: `Kevin is in a Slack huddle. Decide whether He speaks now. Call respond with the words He says aloud, or stay_silent.\n\nHuddle (speech is machine-transcribed, oldest first; speakerId is a Slack user ID when known):\n${JSON.stringify(huddle)}\n\nThe huddle's conversation:\n${JSON.stringify("visibleToKevin" in channel ? channel : this.channelContext(channel))}${this.musicSection(music)}`,
       },
     ];
-    const context: ToolContext = { origin: { channel: input.channel, requester: input.latest?.speakerId, request: input.latest?.text }, huddle: { channel: input.channel, leave: false } };
+    const context: ToolContext = { origin: { channel: input.channel, requester: input.latest?.speakerId, request: input.latest?.text }, huddle: { channel: input.channel, leave: false }, focus };
     // Low reasoning effort: on a call, a long pause is worse than a plainer line.
     const turn = await this.generate(messages, scope, elapsed, context, { reasoning: { effort: "low" } });
     return { text: turn.action === "respond" ? turn.text : undefined, leave: context.huddle!.leave };
@@ -801,14 +824,20 @@ export class KevinAgent {
       ...announcement.detail,
     };
     const request = origin.request ? { requesterProfile: requester, text: origin.request } : null;
+    const focus = memoryFocus({
+      text: [event.meaning, origin.request].filter(Boolean).join("\n"),
+      ids: [origin.requester, origin.channel],
+      setting: [...channelSetting(channel), ...personSetting(requester), preview(JSON.stringify(announcement.detail ?? {}), 300)],
+      histories: [[...threadHistory].reverse(), channelHistory],
+    });
     const messages: Message[] = [
-      { role: "system", content: await this.systemPrompt(memoryFocus(announcement.event, [origin.requester, origin.channel], [{ text: origin.request }, ...[...threadHistory].reverse()], channelHistory), scope) },
+      { role: "system", content: await this.systemPrompt(focus, scope) },
       {
         role: "user",
         content: `HuddleFM reported something Kevin should now address in this conversation. Post Kevin's message here with respond (text only; there is no message to react to), or call stay_silent if it needs no word. Nobody sent a new message; do not reply as though someone did.\n\nHuddleFM report:\n${JSON.stringify(event)}\n\nThe request that led here:\n${JSON.stringify(request)}\n\nCurrent channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent channel context (newest first; author and authorId are included):\n${JSON.stringify(channelHistory)}\n\nCurrent thread context:\n${JSON.stringify(threadHistory)}${this.musicSection(music)}`,
       },
     ];
-    return this.generate(messages, scope, elapsed, { origin });
+    return this.generate(messages, scope, elapsed, { origin, focus });
   }
 
   /** How Kevin summons His channel's user group; the only group mention that is not defused. */
@@ -832,14 +861,15 @@ export class KevinAgent {
       this.slack.history(own.channel, 30),
       this.huddleSection(own.channel, scope),
     ]);
+    const focus = memoryFocus({ text: angle, ids: [own.channel], setting: channelSetting(channel), histories: [channelHistory] });
     const messages: Message[] = [
-      { role: "system", content: `${await this.systemPrompt(memoryFocus(angle, [own.channel], channelHistory), scope)}\n\n${KEVIN_CHANNEL_PROMPT}` },
+      { role: "system", content: `${await this.systemPrompt(focus, scope)}\n\n${KEVIN_CHANNEL_PROMPT}` },
       {
         role: "user",
         content: `Nobody has said anything to Kevin. It is ${this.localTime()}, and He may post something of His own in His channel. Everything Kevin can do when answering a message works here: look things up, save or edit memories, DM people, post elsewhere, react, pin, set His status, join a huddle, and so on, before finishing. Finish with respond to post, or stay_silent if He has nothing worth saying or posted recently. Draw on His memory records and what has happened in the channel; do not repeat or closely echo His earlier posts.\n\nOne direction He could take, if it suits Him:\n${angle}\n\nKevin's channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent messages in it (newest first; author and authorId are included; Kevin's own posts are authored by ${this.kevinId}):\n${JSON.stringify(channelHistory)}${huddle}`,
       },
     ];
-    return this.generate(messages, scope, elapsed, { origin: { channel: own.channel }, phase: "muse" });
+    return this.generate(messages, scope, elapsed, { origin: { channel: own.channel }, phase: "muse", focus });
   }
 
   /** Kevin looks at what just happened in His channel: joins, departures, reactions, pins, huddles. */
@@ -865,14 +895,20 @@ export class KevinAgent {
         secondsAgo: Math.round((Date.now() - event.at) / 1000),
       }))),
     ]);
+    const focus = memoryFocus({
+      text: happened.map(({ what, text }) => [what, text].filter(Boolean).join(": ")).join("\n"),
+      ids: [own.channel, ...events.flatMap(({ user, actor }) => [user, actor])],
+      setting: [...channelSetting(channel), ...happened.flatMap((item) => [item.user, item.by])],
+      histories: [channelHistory],
+    });
     const messages: Message[] = [
-      { role: "system", content: `${await this.systemPrompt(memoryFocus(events.map(({ kind }) => kind).join(" "), [own.channel, ...events.flatMap(({ user, actor }) => [user, actor])], events.map(({ text }) => ({ text })), channelHistory), scope)}\n\n${KEVIN_CHANNEL_PROMPT}` },
+      { role: "system", content: `${await this.systemPrompt(focus, scope)}\n\n${KEVIN_CHANNEL_PROMPT}` },
       {
         role: "user",
         content: `Things just happened in Kevin's channel, and He noticed. Nobody addressed Him. Decide whether any of it deserves His attention. Everything Kevin can do when answering a message works here: look people up, save or edit memories, DM them, react, pin, remove someone from the channel, and so on. Finish with respond to post, or stay_silent. He does not need to remark on everything.\n\nWhat happened (oldest first${omitted ? `; ${omitted} earlier events omitted` : ""}):\n${JSON.stringify(happened)}\n\nKevin's channel:\n${JSON.stringify(this.channelContext(channel))}\n\nRecent messages in it (newest first; author and authorId are included):\n${JSON.stringify(channelHistory)}${huddle}`,
       },
     ];
-    return this.generate(messages, scope, elapsed, { origin: { channel: own.channel }, phase: "observe" });
+    return this.generate(messages, scope, elapsed, { origin: { channel: own.channel }, phase: "observe", focus });
   }
 
   /** The memory section of a system prompt: everything while it fits, otherwise what bears on the turn. */
@@ -969,7 +1005,7 @@ export class KevinAgent {
       if (name === "get_channel_members") return JSON.stringify(await this.slack.members(args.channel, args.limit));
       if (name === "get_user_profile") return JSON.stringify(await this.slack.userProfile(args.user));
       if (name === "list_user_groups") return JSON.stringify(await this.slack.userGroups(args.include_users === true));
-      if (name === "search_memory") return JSON.stringify(await this.recall.search(String(args.query ?? ""), args.limit));
+      if (name === "search_memory") return JSON.stringify(await this.recall.search(String(args.query ?? ""), args.limit, context.focus));
       if (name === "save_memory" && allowMemory) return JSON.stringify(await this.memory.save(args.content));
       if (name === "edit_memory" && allowMemory) return JSON.stringify(await this.memory.edit(args.id, args.content));
       if (name === "delete_memory" && allowMemory && context.manager) return JSON.stringify(await this.memory.delete(args.id));
