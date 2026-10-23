@@ -21,17 +21,14 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Kevin can run the music in Slack huddles through [HuddleFM](https://github.com/ingoau/huddlefm/blob/main/docs/bot-api.md). See [HuddleFM](#huddlefm).
 - Kevin can join Slack huddles, listen, talk, and mute people. See [Huddles](#huddles).
 - Kevin can have a channel of His own that He posts in at random and watches closely. See [Kevin's channel](#kevins-channel).
-- Kevin keeps a small memory of what He will use later, and tidies it daily. See [Memory](#memory).
+- Kevin's memory lives in `MEMORY_FILE` (default `./data/memory.json`). See [Memory](#memory).
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
 
 ## Memory
 
-Kevin's memory is for what He will use later, not a file on everyone. He records commitments made to or by Him, unresolved matters, fees, policies, and running bits He has established, people's work roles and standing with Him, preferences about how to treat someone, and things He is asked to remember. He does not catalogue people's personal lives, habits, tastes, or opinions, and does not record health, family, relationships, where someone lives, finances, politics, religion, or sexuality unless that person asked Him to. He keeps one record per person or subject and folds new facts into it.
-
-- *Limits:* at most two memory changes per turn (manager commands are exempt). Records over 1,000 characters are refused. A save identical to an existing record (ignoring case and punctuation) is skipped. A save on a person or subject that already has a record still goes through, and Kevin is pointed at the existing record so He edits it next time.
-- *Prompts:* each prompt carries every record while they fit in `MEMORY_PROMPT_CHARS` (default 12,000 characters). Past that, it carries the records that mention the Slack IDs in the conversation or share its rarer words, then the most recent, and says how many were left out. `search_memory` finds the rest by words, names, or Slack IDs.
-- *Tidying:* ten minutes after startup and then every `MEMORY_TIDY_HOURS` (default 24; `0` turns it off), when memory has changed, the reply model goes through every record in batches of 30, each person's records kept together. It merges records about the same person or subject, condenses them, and drops trivia, profiling, sensitive details, settled matters, and duplicates under the same rules. It never merges different people's records. A batch is left alone if the answer cites unknown IDs, cites one twice, would delete the whole batch, or if a record in it changed meanwhile. Before each pass the file is copied to `memory.json.bak-<date>` (the day's first copy is kept; the last three days are retained).
-- *Storage:* `MEMORY_FILE` (default `./data/memory.json`) is read once at startup and kept in memory. Every change is written atomically before it takes effect, and pending writes finish before shutdown. A file that is not valid JSON is moved aside to `memory.json.corrupt-<time>`, and Kevin starts with an empty memory instead of failing every reply.
+- The file is read once at startup and kept in memory; every save, edit, and delete is written atomically before it takes effect, and pending writes finish before shutdown. A file that is not valid JSON is moved aside to `memory.json.corrupt-<time>` and Kevin starts with an empty memory instead of failing every reply.
+- Each prompt carries every record while they fit in `MEMORY_PROMPT_CHARS` (default 24,000 characters). Past that, it carries the records that mention the Slack IDs in the conversation or share its rarer words, then the most recent, and tells Kevin how many were left out. `search_memory` finds the rest by words, names, or Slack IDs.
+- `save_memory` skips a record identical to an existing one (ignoring case and punctuation) and, when existing records look like the same subject, saves but names them so Kevin can merge them with `edit_memory`. Empty records and records over 1,000 characters are refused.
 
 ## HuddleFM
 

@@ -91,7 +91,7 @@ This channel is Kevin's own. He posts here when He chooses, and He sees everythi
 /** Directions an unprompted post may take; one is offered at random so posts do not settle into a format. */
 export const MUSE_ANGLES = [
   "A new internal policy, effective immediately, with no stated reason.",
-  "A follow-up on someone in His memory records: a commitment, a plan, an unresolved matter He has not forgotten.",
+  "A follow-up on someone in His memory records: a plan, a habit, an unresolved matter He has not forgotten.",
   "An observation about recent activity in this channel, or the lack of it.",
   "A revision to the fee schedule, aimed at a specific behaviour.",
   "A remark about where Kevin is, or is not, right now.",
@@ -101,24 +101,3 @@ export const MUSE_ANGLES = [
   "Something Kevin noticed today that He has decided is everyone's problem.",
   "A reminder of something nobody was told in the first place.",
 ];
-
-export const MEMORY_TIDY_PROMPT = `You maintain the memory of Kevin, a Slack persona who plays a corporate executive. His memory is a set of short records He uses in later conversations. It must stay small and useful; it is not a file on everyone. You receive a batch of records and return the batch as it should be.
-
-Keep only what Kevin will use later:
-- commitments and promises made to or by Kevin, and debts, fees, or deadlines still open;
-- unresolved matters and ongoing situations He may follow up on;
-- fees, policies, and running bits He has established;
-- someone's work role or standing with Kevin;
-- preferences that change how Kevin should treat someone (what they want to be called, a topic they asked Him to drop);
-- anything a record says someone explicitly asked Kevin to remember.
-
-Drop:
-- trivia, one-off chatter, and records that only say someone talked to Kevin;
-- catalogues of someone's personal life, habits, tastes, or opinions kept for their own sake;
-- health, family, relationships, where someone lives, finances, politics, religion, or sexuality, unless the record says the person asked Kevin to remember it;
-- matters that are settled or plans whose time has clearly passed, unless they became a running bit;
-- guesses and duplicates.
-
-Merge records about the same person or subject into one standalone record that keeps the specifics worth keeping (dates, amounts, exact Slack IDs written as "Slack user U123 (Name)"). Never merge records about different people. Never invent, infer, or embellish anything that is not in the sources. Condense wording; each record stays under 400 characters.
-
-For every record you return, list in "from" the exact IDs of the input records it replaces. An input record you do not cite is deleted. Cite each input ID at most once. A record that is fine as it is comes back with its content unchanged and its own ID alone.`;
