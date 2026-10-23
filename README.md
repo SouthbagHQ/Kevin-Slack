@@ -21,7 +21,7 @@ Kevin listens through Slack's browser WebSocket gateway using a user session:
 - Kevin can run the music in Slack huddles through [HuddleFM](https://github.com/ingoau/huddlefm/blob/main/docs/bot-api.md). See [HuddleFM](#huddlefm).
 - Kevin can join Slack huddles, listen, talk, and mute people. See [Huddles](#huddles).
 - Kevin can have a channel of His own that He posts in at random and watches closely. See [Kevin's channel](#kevins-channel).
-- Kevin's memory lives in `MEMORY_FILE` (default `./data/memory.json`). See [Memory](#memory).
+- Kevin remembers everything, and each reply is reminded only of the memories that bear on it. See [Memory](#memory).
 - Image attachments are represented by opaque IDs in context. Kevin can load an image on demand through a vision tool; private Slack image URLs and bytes are not sent unless He chooses to inspect it.
 
 ## Memory
