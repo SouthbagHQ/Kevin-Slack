@@ -9,9 +9,10 @@ import { HuddleFm, type Announcement } from "./huddlefm.js";
 import { KevinChannel } from "./kevin-channel.js";
 import { Huddles } from "./huddle/huddles.js";
 import { SpeechClient } from "./huddle/speech.js";
-import { OPENROUTER_BASE } from "./chat.js";
+import { createKevinChat, OPENROUTER_BASE } from "./chat.js";
 import { createLogger, getLogLevel, preview, setLogFormat, setLogLevel, timer } from "./logger.js";
 import { MemoryStore } from "./memory.js";
+import { MemoryTidy } from "./memory-tidy.js";
 import { isBotMessage, isEphemeralMessage, isIgnoredMessage, isManagerCommand, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "./message-rules.js";
 import { messageRef, Slack, type SlackMessage } from "./slack.js";
 import { ThreadMutes } from "./thread-mutes.js";
@@ -76,6 +77,10 @@ const ownSchedule = ownChannel ? parseCron(config.kevinChannelCron, ownChannel.t
 const memory = new MemoryStore(config.memoryFile);
 // Read once at startup so a missing volume or a broken file shows up now, not on the first reply.
 log.info("Memory ready", { file: config.memoryFile, records: (await memory.list()).length });
+const memoryTidy = config.memoryTidyHours
+  ? new MemoryTidy(memory, createKevinChat(config.hackClubAiKey, config.openRouterKey), { model: config.replyModel, intervalMs: config.memoryTidyHours * 3_600_000 })
+  : undefined;
+memoryTidy?.start();
 const kevin = new KevinAgent(slack, memory, channelModes, userId, huddleFm, huddles, ownChannel);
 if (huddles) {
   huddles.onVoiceTurn = (input) => kevin.voiceTurn(input);
@@ -366,6 +371,7 @@ const shutdown = async (signal: string) => {
   log.info("Shutting down", { signal });
   huddleFm?.stop();
   kevinChannel?.stop();
+  memoryTidy?.stop();
   await huddles?.stop().catch((error) => log.failure("Leaving huddles on shutdown failed", error));
   await memory.flush();
   try {

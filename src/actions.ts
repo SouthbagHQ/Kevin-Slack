@@ -5,6 +5,7 @@ const log = createLogger("actions");
 export const MAX_SENDS_PER_TURN = 3;
 export const MAX_REACTIONS_PER_TURN = 5;
 export const MAX_RESPOND_REACTIONS = 3;
+export const MAX_MEMORY_WRITES_PER_TURN = 2;
 const MAX_STATUS_CHARS = 100;
 const MAX_STATUS_MINUTES = 7 * 24 * 60;
 
@@ -72,12 +73,16 @@ export const replyThread = (message: { ts: string; thread_ts?: string }, inThrea
   return message.thread_ts;
 };
 
-type Budgeted = "sends" | "reactions";
+type Budgeted = "sends" | "reactions" | "memories";
 
-/** Per-turn caps on side effects, so injected text or a loop cannot mass-message or spam reactions. */
+/** Per-turn caps on side effects, so injected text or a loop cannot mass-message, spam reactions, or flood memory. */
 export class TurnBudget {
-  private used = { sends: 0, reactions: 0 };
-  private limits = { sends: MAX_SENDS_PER_TURN, reactions: MAX_REACTIONS_PER_TURN };
+  private used = { sends: 0, reactions: 0, memories: 0 };
+  private limits: Record<Budgeted, number>;
+
+  constructor(limits: Partial<Record<Budgeted, number>> = {}) {
+    this.limits = { sends: MAX_SENDS_PER_TURN, reactions: MAX_REACTIONS_PER_TURN, memories: MAX_MEMORY_WRITES_PER_TURN, ...limits };
+  }
   /** Channels to leave once the final action is delivered. */
   readonly leaveAfter = new Set<string>();
 
@@ -88,7 +93,7 @@ export class TurnBudget {
   }
 }
 
-const spend = (budget: TurnBudget, kind: Budgeted, action: string) => budget.take(kind)
+export const spend = (budget: TurnBudget, kind: Budgeted, action: string) => budget.take(kind)
   ? undefined
   : deny(action, "turn-budget-spent", `The per-turn limit for ${kind} is spent. Nothing was done.`);
 

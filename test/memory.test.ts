@@ -53,7 +53,7 @@ describe("MemoryStore reliability", () => {
     const first = await store.save("Slack user U123ABC (Bob) moved to Melbourne.");
     expect(await store.save("slack user U123ABC (bob) moved to melbourne")).toMatchObject({ id: first.id, duplicate: true });
     const similar = await store.save("Slack user U123ABC (Bob) moved to Melbourne in March.");
-    expect(similar.similar).toMatchObject([{ id: first.id }]);
+    expect(similar.related).toMatchObject([{ id: first.id }]);
     expect(await store.list()).toHaveLength(2);
   });
 

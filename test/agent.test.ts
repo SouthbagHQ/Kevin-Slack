@@ -173,3 +173,35 @@ describe("KevinAgent tool rounds and memory", () => {
     expect(memory.search).toHaveBeenCalledWith("sharks", undefined);
   });
 });
+
+describe("KevinAgent memory budget", () => {
+  const saving = (manager: boolean) => {
+    const { agent } = setup(
+      toolTurn(call("save_memory", { content: "a" }, "1"), call("save_memory", { content: "b" }, "2"), call("edit_memory", { id: "m1", content: "c" }, "3")),
+      toolTurn(call("stay_silent", {})),
+    );
+    const memory = { list: async () => [], save: vi.fn(async (content: string) => ({ id: content, content })), edit: vi.fn(async (id: string, content: string) => ({ id, content })) };
+    Object.assign(agent, { memory });
+    return { agent, memory, run: () => agent.respond(message, { manager }) };
+  };
+
+  it("caps memory changes per turn", async () => {
+    const { memory, run } = saving(false);
+    await run();
+    expect(memory.save).toHaveBeenCalledTimes(2);
+    expect(memory.edit).not.toHaveBeenCalled();
+  });
+
+  it("does not cap a manager command", async () => {
+    const { memory, run } = saving(true);
+    await run();
+    expect(memory.save).toHaveBeenCalledTimes(2);
+    expect(memory.edit).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells Kevin memory is not a file on everyone", async () => {
+    const { agent, chat } = setup(toolTurn(call("stay_silent", {})));
+    await agent.respond(message);
+    expect((chat.mock.calls[0]![0].messages[0] as { content: string }).content).toContain("not a file on everyone");
+  });
+});
