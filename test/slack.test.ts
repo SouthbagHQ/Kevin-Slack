@@ -46,6 +46,12 @@ describe("Slack", () => {
     }
   });
 
+  it("keeps only the fields Kevin uses from a raw Slack event", () => {
+    const slack = new Slack("token", "cookie");
+    const raw = { channel: "C1", ts: "1.0", user: "U1", text: "hi", team: "T1", client_msg_id: "x", user_profile: { image_72: "https://a" }, event_ts: "1.0" };
+    expect(slack.modelMessage(raw as never)).toEqual({ channel: "C1", ts: "1.0", user: "U1", text: "hi", messageType: { kind: "message", visibility: "channel", fromBot: false, inThread: false } });
+  });
+
   it("labels ephemeral messages in model context", () => {
     const slack = new Slack("token", "cookie");
     expect(slack.modelMessage({

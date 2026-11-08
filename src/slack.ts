@@ -1,7 +1,7 @@
 import { WebClient, type ChatPostMessageArguments } from "@slack/web-api";
 import WebSocket from "ws";
 import { createLogger, preview, timer } from "./logger.js";
-import { describeMessageType, isIgnoredMessage } from "./message-rules.js";
+import { describeMessageType, historyMessageType, isIgnoredMessage } from "./message-rules.js";
 import { formatOutgoing } from "./outgoing.js";
 
 export type SlackMessage = {
@@ -226,9 +226,16 @@ export class Slack {
     }));
   }
 
+  /**
+   * The current message as the model sees it. Only the fields Kevin uses are
+   * kept: raw Slack events also carry the sender's whole profile, bot
+   * profiles, team IDs, and client IDs, which cost tokens and say nothing.
+   */
   modelMessage(message: SlackMessage) {
-    const { files: _files, attachments: _attachments, blocks: _blocks, hidden: _hidden, is_ephemeral: _ephemeral, pinned_to: pinnedTo, ...plain } = message;
+    const { pinned_to: pinnedTo } = message;
     const images = this.imageReferences(message, message.channel);
+    const raw = message as SlackMessage & { username?: string };
+    const plain = Object.fromEntries((["channel", "ts", "thread_ts", "user", "bot_id", "username", "text"] as const).filter((key) => raw[key] !== undefined).map((key) => [key, raw[key]]));
     return {
       ...plain,
       messageType: describeMessageType(message),
@@ -603,7 +610,7 @@ export class Slack {
         author: await this.name(message.user ?? message.bot_id),
         text: message.text ?? "",
         thread_ts: message.thread_ts,
-        messageType: describeMessageType(message),
+        ...historyMessageType(message),
         ...(pinned.has(message.ts) || message.pinned_to?.includes(channel) ? { pinned: true } : {}),
         ...(images.length ? { images } : {}),
       };

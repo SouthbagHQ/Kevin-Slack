@@ -67,3 +67,12 @@ export const describeMessageType = (message: {
       : {}),
   };
 };
+
+/**
+ * messageType for a history entry: left out for an ordinary human message,
+ * which is most of them, and without inThread, which thread_ts already says.
+ */
+export const historyMessageType = (message: Parameters<typeof describeMessageType>[0]): { messageType?: Omit<MessageTypeContext, "inThread"> } => {
+  const { inThread: _inThread, ...type } = describeMessageType(message);
+  return type.kind === "message" && type.visibility === "channel" && !type.fromBot ? {} : { messageType: type };
+};
