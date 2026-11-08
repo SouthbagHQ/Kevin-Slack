@@ -14,8 +14,8 @@ export const config = {
   slackCookieS: process.env.SLACK_XOXD_S,
   channelModesFile: process.env.CHANNEL_MODES_FILE ?? "./data/channel-modes.json",
   memoryFile: process.env.MEMORY_FILE ?? "./data/memory.json",
-  memoryPromptChars: Number(process.env.MEMORY_PROMPT_CHARS ?? 8_000),
-  memoryPromptLimit: Number(process.env.MEMORY_PROMPT_LIMIT ?? 25),
+  memoryPromptChars: Number(process.env.MEMORY_PROMPT_CHARS ?? 6_000),
+  memoryPromptLimit: Number(process.env.MEMORY_PROMPT_LIMIT ?? 20),
   memoryMinSimilarity: Number(process.env.MEMORY_MIN_SIMILARITY ?? 0.35),
   memoryEmbeddingModel: /^(off|false|0|no)$/i.test(process.env.MEMORY_EMBEDDING_MODEL ?? "") ? undefined : process.env.MEMORY_EMBEDDING_MODEL?.trim() || "openai/text-embedding-3-small",
   threadMutesFile: process.env.THREAD_MUTES_FILE ?? "./data/thread-mutes.json",
@@ -44,13 +44,16 @@ export const config = {
   kevinChannelTimezone: process.env.KEVIN_CHANNEL_TIMEZONE?.trim() || undefined,
   logLevel: process.env.LOG_LEVEL ?? "info",
   logFormat: process.env.LOG_FORMAT ?? "text",
-  replyModel: "google/gemini-3.8-flash",
+  replyModel: process.env.REPLY_MODEL?.trim() || "google/gemini-3.8-flash",
+  /** Reasoning effort for Kevin's replies; "default" leaves it to the provider. */
+  replyReasoningEffort: process.env.REPLY_REASONING_EFFORT?.trim().toLowerCase() || "low",
   classifierModel: "google/gemini-3.5-flash-lite",
 };
 
 /** The runtime settings worth printing at startup; never includes credentials. */
 export const configSummary = () => ({
   replyModel: config.replyModel,
+  replyReasoningEffort: config.replyReasoningEffort,
   classifierModel: config.classifierModel,
   queueConcurrency: config.queueConcurrency,
   messageDebounceMs: config.messageDebounceMs,

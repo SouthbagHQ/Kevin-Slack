@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeMessageType, isBotMessage, isManagerCommand, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage } from "../src/message-rules.js";
+import { describeMessageType, isBotMessage, isManagerCommand, isEphemeralMessage, isIgnoredMessage, isMentioned, isRespondableMessage, isStopCommand, shouldClassifyRelevance, shouldConsiderMessage, historyMessageType } from "../src/message-rules.js";
 
 describe("message rules", () => {
   it("ignores messages beginning with ##", () => {
@@ -80,5 +80,13 @@ describe("isManagerCommand", () => {
     expect(isManagerCommand({ channel: "D1", user: "UOTHER", text: "!update the memory" }, managers)).toBe(false);
     expect(isManagerCommand({ channel: "C1", user: "UBOSS", text: "!update the memory" }, managers)).toBe(false);
     expect(isManagerCommand({ channel: "D1", user: "UBOSS", bot_id: "B1", text: "!update" }, managers)).toBe(false);
+  });
+});
+
+describe("historyMessageType", () => {
+  it("leaves out ordinary human messages and drops inThread", () => {
+    expect(historyMessageType({ thread_ts: "1.0" })).toEqual({});
+    expect(historyMessageType({ bot_id: "B1", thread_ts: "1.0" })).toEqual({ messageType: { kind: "bot_message", visibility: "channel", fromBot: true } });
+    expect(historyMessageType({ subtype: "channel_topic" })).toEqual({ messageType: { kind: "channel_topic", visibility: "channel", fromBot: false, subtype: "channel_topic" } });
   });
 });

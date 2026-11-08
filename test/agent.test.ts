@@ -54,6 +54,28 @@ describe("KevinAgent.respond", () => {
     expect(await setup(textTurn("")).agent.respond(message)).toMatchObject({ action: "silent" });
   });
 
+  it("writes memories carried by respond in the same model call, at low reasoning effort", async () => {
+    const { agent, chat } = setup(toolTurn(call("respond", { text: "Noted.", memories: [{ content: "Slack user UBOB (Bob) has a corgi named Biscuit." }, { id: "m1", content: "Slack user UBOB (Bob) owes Kevin $20." }, { content: "  " }] })));
+    const memory = { list: async () => [], save: vi.fn(async (content: string) => ({ id: "m2", content })), edit: vi.fn(async (id: string, content: string) => ({ id, content })) };
+    Object.assign(agent, { memory });
+    expect(await agent.respond(message)).toEqual({ action: "respond", text: "Noted.", reactions: [], broadcast: false, leaveAfter: [] });
+    expect(memory.save).toHaveBeenCalledWith("Slack user UBOB (Bob) has a corgi named Biscuit.");
+    expect(memory.edit).toHaveBeenCalledWith("m1", "Slack user UBOB (Bob) owes Kevin $20.");
+    expect(memory.save).toHaveBeenCalledTimes(1);
+    expect(chat).toHaveBeenCalledTimes(1);
+    const request = chat.mock.calls[0]![0] as { reasoning?: unknown; tools?: { function: { name: string } }[] };
+    expect(request.reasoning).toEqual({ effort: "low" });
+    expect(request.tools!.map(({ function: { name } }) => name)).not.toContain("save_memory");
+  });
+
+  it("still replies when a memory write fails, and lets silence carry memories", async () => {
+    const { agent } = setup(toolTurn(call("stay_silent", { reason: "noted", memories: [{ id: "gone", content: "Slack user UBOB (Bob) is new." }] })));
+    const memory = { list: async () => [], edit: vi.fn(async () => { throw new Error("Memory gone not found"); }) };
+    Object.assign(agent, { memory });
+    expect(await agent.respond(message)).toEqual({ action: "silent", reason: "noted", leaveAfter: [] });
+    expect(memory.edit).toHaveBeenCalledWith("gone", "Slack user UBOB (Bob) is new.");
+  });
+
   it("returns deliberate silence", async () => {
     const { agent } = setup(toolTurn(call("stay_silent", { reason: "beneath Him" })));
     expect(await agent.respond(message)).toEqual({ action: "silent", reason: "beneath Him", leaveAfter: [] });
@@ -95,14 +117,14 @@ describe("KevinAgent in His own channel", () => {
 
   it("lets a scheduled post use the same tools as a reply, and thread under a message", async () => {
     const { agent, slack, chat, memory } = own(
-      toolTurn(call("send_dm", { user: "UBOB", text: "The report." }), call("save_memory", { content: "Slack user UBOB (Bob) was chased for the report." })),
-      toolTurn(call("respond", { text: "Bob has been reminded.", thread_ts: "5.0", reactions: ["eyes"] })),
+      toolTurn(call("send_dm", { user: "UBOB", text: "The report." })),
+      toolTurn(call("respond", { text: "Bob has been reminded.", thread_ts: "5.0", reactions: ["eyes"], memories: [{ content: "Slack user UBOB (Bob) was chased for the report." }] })),
     );
     expect(await agent.muse()).toMatchObject({ action: "respond", text: "Bob has been reminded.", threadTs: "5.0", reactions: ["eyes"] });
     expect(slack.post).toHaveBeenCalledWith("D9", "The report.");
     expect(memory.save).toHaveBeenCalled();
     const offered = chat.mock.calls[0]![0].tools!.map(({ function: { name } }) => name);
-    expect(offered).toEqual(expect.arrayContaining(["get_channel_history", "save_memory", "send_dm", "add_reaction", "pin_message", "respond", "stay_silent"]));
+    expect(offered).toEqual(expect.arrayContaining(["get_channel_history", "search_memory", "send_dm", "add_reaction", "pin_message", "respond", "stay_silent"]));
   });
 
   it("shows departures with who and when", async () => {

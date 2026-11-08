@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { createLogger, preview, timer } from "./logger.js";
 
 export type Memory = { id: string; content: string; createdAt: string; updatedAt?: string };
-/** What save_memory hands back: the record, plus a nudge when it duplicates or overlaps others. */
+/** What a memory save hands back: the record, plus a nudge when it duplicates or overlaps others. */
 export type SavedMemory = Memory & { duplicate?: true; similar?: ReturnType<typeof promptMemory>[]; note?: string };
 
 /**
@@ -152,7 +152,7 @@ export class MemoryStore {
       memories.push(memory);
       log.info("Saved memory", { id: memory.id, total: memories.length, similar: similar.length || undefined, content: preview(memory.content, 160) });
       return {
-        result: similar.length ? { ...memory, similar, note: "Saved. These existing memories look like the same subject; merge them with edit_memory if they overlap." } : memory,
+        result: similar.length ? { ...memory, similar, note: "Saved. These existing memories look like the same subject; merge them by rewriting one with its id if they overlap." } : memory,
         changed: true,
       };
     });

@@ -27,10 +27,45 @@ const deny = (action: string, reason: string, error: string, fields: Record<stri
   return { ok: false, error };
 };
 
-/** How a turn ends: a reply and/or reactions on the current message, or deliberate silence. */
+/** A memory written as the turn ends: a new record, or a rewrite of the record with `id`. */
+export type MemoryWrite = { id?: string; content: string };
+
+/** How a turn ends: a reply and/or reactions on the current message, or deliberate silence; either may carry memory writes. */
 export type Outcome =
-  | { action: "respond"; text?: string; reactions: string[]; inThread?: boolean; threadTs?: string; broadcast: boolean }
-  | { action: "silent"; reason: string };
+  | { action: "respond"; text?: string; reactions: string[]; inThread?: boolean; threadTs?: string; broadcast: boolean; memories?: MemoryWrite[] }
+  | { action: "silent"; reason: string; memories?: MemoryWrite[] };
+
+export const MAX_MEMORY_WRITES = 5;
+
+/**
+ * Memory writes attached to a final action. A malformed entry is dropped
+ * rather than refusing the turn, so a bad memory never costs Kevin a reply.
+ */
+export const parseMemoryWrites = (raw: unknown): MemoryWrite[] => {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    log.warn("Memory writes dropped; not an array", { memories: preview(raw, 120) });
+    return [];
+  }
+  const writes: MemoryWrite[] = [];
+  for (const item of raw) {
+    const entry = (item ?? {}) as Record<string, unknown>;
+    const content = typeof entry.content === "string" ? entry.content.trim() : "";
+    const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : undefined;
+    if (!content) {
+      log.warn("Memory write dropped; no content", { memory: preview(item, 120) });
+      continue;
+    }
+    writes.push(id ? { id, content } : { content });
+  }
+  if (writes.length > MAX_MEMORY_WRITES) log.warn("Memory writes over the limit; keeping the first ones", { requested: writes.length, kept: MAX_MEMORY_WRITES });
+  return writes.slice(0, MAX_MEMORY_WRITES);
+};
+
+const withMemories = (raw: unknown) => {
+  const memories = parseMemoryWrites(raw);
+  return memories.length ? { memories } : {};
+};
 
 export const TERMINAL_TOOLS = new Set(["respond", "stay_silent"]);
 
@@ -56,12 +91,12 @@ export const parseRespond = (args: Record<string, unknown>): { ok: true; outcome
   const broadcast = args.broadcast === true;
   if (broadcast && inThread === false) return deny(action, "broadcast-without-thread", "broadcast only applies to a thread reply.");
   if (broadcast && !text) return deny(action, "broadcast-without-text", "broadcast requires text.");
-  return { ok: true, outcome: { action: "respond", ...(text ? { text } : {}), reactions: reactions as string[], ...(inThread === undefined ? {} : { inThread }), ...(threadTs ? { threadTs } : {}), broadcast } };
+  return { ok: true, outcome: { action: "respond", ...(text ? { text } : {}), reactions: reactions as string[], ...(inThread === undefined ? {} : { inThread }), ...(threadTs ? { threadTs } : {}), broadcast, ...withMemories(args.memories) } };
 };
 
 export const parseSilence = (args: Record<string, unknown>): { ok: true; outcome: Outcome } => ({
   ok: true,
-  outcome: { action: "silent", reason: typeof args.reason === "string" && args.reason.trim() ? args.reason.trim() : "unspecified" },
+  outcome: { action: "silent", reason: typeof args.reason === "string" && args.reason.trim() ? args.reason.trim() : "unspecified", ...withMemories(args.memories) },
 });
 
 /** Where the respond outcome lands relative to the message being answered. */
