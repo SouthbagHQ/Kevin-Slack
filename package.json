@@ -11,17 +11,21 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@slack/web-api": "^7.0.0",
-    "dotenv": "^17.0.0",
+    "@slack/web-api": "^8.4.0",
+    "dotenv": "^18.0.10",
     "libopus-wasm": "0.4.1",
-    "node-datachannel": "0.33.4",
-    "protobufjs": "8.8.0",
-    "ws": "^8.18.0"
+    "node-datachannel": "0.33.6",
+    "protobufjs": "8.8.1",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.0",
-    "tsx": "^4.20.0",
-    "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "axios": "^1.21.1",
+    "follow-redirects": "^1.16.3"
   }
 }
